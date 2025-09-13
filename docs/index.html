@@ -11,23 +11,41 @@
     class="bg-gray-100 min-h-screen flex flex-col items-center justify-center"
   >
     <header class="mb-8">
-      <h1 class="text-4xl font-bold text-blue-600">
-        Welcome to HTMX + TailwindCSS
-      </h1>
+      <h1 class="text-4xl font-bold text-blue-600">Welcome to Demo App</h1>
       <p class="text-lg text-gray-700 mt-2">Deployed on GitHub Pages</p>
     </header>
     <main class="w-full max-w-xl p-6 bg-white rounded shadow">
-      <button
-        class="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600"
-        hx-get="/some-endpoint"
-        hx-target="#result"
-        hx-swap="innerHTML"
+      <!-- Cart -->
+      <div
+        id="cart"
+        class="cursor-pointer px-3 py-1 rounded bg-blue-600 text-white text-sm"
+        hx-get="/cart"
+        hx-trigger="load"
       >
-        Load Content with HTMX
-      </button>
-      <div id="result" class="mt-4 text-gray-800">
-        <!-- HTMX will load content here -->
+        <!-- server fills cart fragment -->
       </div>
+      <!-- Navigation -->
+      <nav class="px-6 py-3 bg-gray-100 border-b">
+        <a
+          class="mr-4 text-blue-600 hover:underline"
+          hx-get="/todos"
+          hx-target="#content"
+          hx-push-url="true"
+          >TODOs</a
+        >
+        <a
+          class="text-blue-600 hover:underline"
+          hx-get="/shop"
+          hx-target="#content"
+          hx-push-url="true"
+          >Shop</a
+        >
+      </nav>
+
+      <!-- Main content area -->
+      <main id="content" class="p-6" hx-get="/todos" hx-trigger="load">
+        <!-- TODOs will load here by default -->
+      </main>
     </main>
     <footer class="mt-8 text-gray-500 text-sm">&copy; 2025 HTMZ</footer>
   </body>

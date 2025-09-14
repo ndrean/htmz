@@ -19,7 +19,7 @@ pub const index_html =
     \\<header class="mb-8 text-center">
     \\<h1 class="text-5xl font-extrabold text-blue-600">My Shopping Cart</h1>
     \\<p class="text-md text-gray-500 mt-2">Frontend: <code>HTMX</code> & <code>TailwindCSS</code></p>
-    \\<p class="text-md text-gray-500 mt-1">Backend:  <code>Zig</code>, <code>http.zig</code>, <code>sqlite.zig</code> and <code>zexplorer</code></p>
+    \\<p class="text-md text-gray-500 mt-1">Backend:  <code>Zig</code>, <code>Zap</code>, <code>sqlite.zig</code> and <code>zexplorer</code></p>
     \\</header>
     \\<main class="w-full max-w-6xl p-8 bg-white rounded-2xl shadow-xl">
     \\<!-- Navigation -->

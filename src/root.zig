@@ -1,25 +1,123 @@
-//! By convention, root.zig is the root source file when making a library.
+//! New ZZZ-based HTTP server implementation
 const std = @import("std");
-pub const httpz = @import("httpz");
 pub const z = @import("zexplorer");
 const sqlite = @import("sqlite");
 const grocery_items = @import("grocery_items.zig").grocery_list;
+const GroceryItem = @import("grocery_items.zig").GroceryItem;
+
+const zap = @import("zap");
+
+// Global app context for request handling
+var global_app: *App = undefined;
+
+// URL decode function to handle %20 -> space, etc.
+fn urlDecode(allocator: std.mem.Allocator, encoded: []const u8) ![]u8 {
+    var decoded: std.ArrayList(u8) = .empty;
+    errdefer decoded.deinit(allocator);
+
+    var i: usize = 0;
+    while (i < encoded.len) {
+        if (encoded[i] == '%' and i + 2 < encoded.len) {
+            // Parse hex characters
+            const hex_str = encoded[i + 1 .. i + 3];
+            if (std.fmt.parseInt(u8, hex_str, 16)) |byte_val| {
+                try decoded.append(allocator, byte_val);
+                i += 3;
+            } else |_| {
+                // Invalid hex, treat as literal %
+                try decoded.append(allocator, encoded[i]);
+                i += 1;
+            }
+        } else if (encoded[i] == '+') {
+            // + is also a space in URL encoding
+            try decoded.append(allocator, ' ');
+            i += 1;
+        } else {
+            try decoded.append(allocator, encoded[i]);
+            i += 1;
+        }
+    }
+
+    return decoded.toOwnedSlice(allocator);
+}
+
+// Data abstraction layer - works for both memory and SQLite
+fn getItemById(data_source: DataSource, id: u32) ?GroceryItem {
+    switch (data_source) {
+        .memory => {
+            // In memory mode, ID is the array index
+            if (id >= grocery_items.len) return null;
+            return grocery_items[id];
+        },
+        .sqlite => |_| {
+            // In SQLite mode, ID would be the database primary key
+            // For now, fallback to memory behavior until SQLite is implemented
+            if (id >= grocery_items.len) return null;
+            return grocery_items[id];
+        },
+    }
+}
+
+fn findItemIdByName(name: []const u8) ?u32 {
+    // Helper function to find ID by name (useful for internal lookups)
+    for (grocery_items, 0..) |item, index| {
+        if (std.mem.eql(u8, item.name, name)) {
+            return @as(u32, @intCast(index));
+        }
+    }
+    return null;
+}
+
+// Session management functions
+fn generateSessionId(allocator: std.mem.Allocator) ![]u8 {
+    // Simple session ID: timestamp + random number
+    const timestamp = std.time.timestamp();
+    const random = std.crypto.random.int(u32);
+    return std.fmt.allocPrint(allocator, "sess_{d}_{d}", .{ timestamp, random });
+}
+
+fn getSessionId(r: zap.Request) ?[]const u8 {
+    // Try to get session ID from cookie first, then from X-Session-Id header
+    if (r.getCookieStr(global_app.allocator, "session_id") catch null) |cookie_value| {
+        return cookie_value;
+    }
+
+    // Fallback to custom header (for load testing)
+    if (r.getHeader("x-session-id")) |header_value| {
+        return header_value;
+    }
+
+    return null;
+}
+
+fn getOrCreateSessionCart(app: *App, session_id: []const u8) !*std.ArrayList(CartItem) {
+    // Check if session already has a cart
+    if (app.session_carts.getPtr(session_id)) |cart_ptr| {
+        return cart_ptr;
+    }
+
+    // Create new cart for this session
+    const new_cart: std.ArrayList(CartItem) = .empty;
+
+    // Copy the session_id string to ensure it persists
+    const owned_session_id = try app.allocator.dupe(u8, session_id);
+    try app.session_carts.put(owned_session_id, new_cart);
+
+    // Return pointer to the cart in the map
+    return app.session_carts.getPtr(owned_session_id).?;
+}
 
 pub fn bPrint(i: usize) !void {
-    // Stdout is for the actual output of your application, for example if you
-    // are implementing gzip, then only the compressed bytes should be sent to
-    // stdout, not any debugging messages.
     var stdout_buffer: [1024]u8 = undefined;
     var stdout_writer = std.fs.File.stdout().writer(&stdout_buffer);
     const stdout = &stdout_writer.interface;
-
     try stdout.print("Run `zig build test` to run the tests: {d}\n", .{i});
-
-    try stdout.flush(); // Don't forget to flush!
+    try stdout.flush();
 }
 
 const CartItem = struct {
-    name: []const u8,
+    item_id: u32,
+    name: []const u8, // Keep name for display purposes
     price: f32,
     quantity: u32,
 };
@@ -37,26 +135,103 @@ const DataSource = union(DataSourceType) {
 const App = struct {
     initial_html: []const u8,
     allocator: std.mem.Allocator,
-    // css_engine: *z.CssSelectorEngine,
     body_node: *z.DomNode,
-    cart: std.ArrayList(CartItem),
-    // Pre-loaded templates (raw HTML templates, not data-filled)
+    session_carts: std.StringHashMap(std.ArrayList(CartItem)), // session_id -> cart
+
+    // Pre-loaded templates (slices already contain length information)
     preloaded_grocery_items_html: []const u8,
     preloaded_groceries_page_html: []const u8,
     preloaded_shopping_list_html: []const u8,
     preloaded_item_details_default_html: []const u8,
-    preloaded_item_details_template: []const u8, // Single template for all items
-    preloaded_cart_item_template: []const u8, // Cart item template
+    preloaded_item_details_template: []const u8,
+    preloaded_cart_item_template: []const u8,
+
     // Data source configuration
     data_source_type: DataSourceType,
     data_source: DataSource,
 };
 
-fn preloadTemplates(
+pub fn runServer(
     allocator: std.mem.Allocator,
+    initial_html: []const u8,
+    css_engine: *z.CssSelectorEngine,
     body_node: *z.DomNode,
-    _: *z.CssSelectorEngine,
-) !struct {
+    use_sqlite: bool,
+) !void {
+    // std.debug.print("Starting Zap-based HTTP server...\n", .{});
+
+    // Preload templates
+    const preloaded = try preloadTemplates(
+        allocator,
+        body_node,
+        css_engine,
+    );
+
+    // Initialize data source
+    const data_source_type: DataSourceType = if (use_sqlite) .sqlite else .memory;
+    const data_source: DataSource = switch (data_source_type) {
+        .memory => .{
+            .memory = std.StringHashMap([]const u8).init(allocator),
+        },
+        .sqlite => blk: {
+            const db = try sqlite.Db.init(.{
+                // .mode = .{ .File = "cart.db" },
+                .mode = .Memory,
+                .open_flags = .{
+                    .write = true,
+                    .create = true,
+                },
+            });
+            break :blk .{ .sqlite = db };
+        },
+    };
+
+    // Initialize App context
+    var app = App{
+        .initial_html = initial_html,
+        .allocator = allocator,
+        .body_node = body_node,
+
+        .session_carts = std.StringHashMap(std.ArrayList(CartItem)).init(allocator),
+
+        .preloaded_grocery_items_html = preloaded.grocery_items_template,
+        .preloaded_groceries_page_html = preloaded.groceries_page_html,
+        .preloaded_shopping_list_html = preloaded.shopping_list_html,
+        .preloaded_item_details_default_html = preloaded.item_details_default_html,
+        .preloaded_item_details_template = preloaded.item_details_template,
+        .preloaded_cart_item_template = preloaded.cart_item_template,
+        .data_source_type = data_source_type,
+        .data_source = data_source,
+    };
+    defer {
+        // Clean up all session carts
+        var cart_iterator = app.session_carts.iterator();
+        while (cart_iterator.next()) |entry| {
+            // Free the allocated session ID key
+            allocator.free(entry.key_ptr.*);
+            // Free the cart ArrayList
+            entry.value_ptr.deinit(allocator);
+        }
+        app.session_carts.deinit();
+    }
+
+    // Store app context globally for the request handler
+    global_app = &app;
+
+    // Initialize Zap HTTP listener
+    var listener = zap.HttpListener.init(.{
+        .port = 8080,
+        .on_request = on_request,
+        .log = false,
+    });
+    try listener.listen();
+
+    // std.log.info("Starting Zap server on http://127.0.0.1:8080", .{});
+    zap.start(.{ .threads = 2, .workers = 2 });
+}
+
+/// extract all the raw templates from the initial HTML
+fn preloadTemplates(allocator: std.mem.Allocator, body_node: *z.DomNode, _: *z.CssSelectorEngine) !struct {
     grocery_items_template: []const u8,
     groceries_page_html: []const u8,
     shopping_list_html: []const u8,
@@ -65,41 +240,23 @@ fn preloadTemplates(
     cart_item_template: []const u8,
 } {
     const doc = z.ownerDocument(body_node);
-
-    // Extract raw templates (no data substitution)
-    // const item_template = try css_engine.querySelector(body_node, "#grocery-item-template");
-    // const grocery_item_template_html = try z.innerTemplateHTML(allocator, item_template.?);
-
     const item_template = try z.querySelector(allocator, doc, "#grocery-item-template");
     const grocery_item_template_html = try z.innerTemplateHTML(allocator, z.elementToNode(item_template.?));
 
     const groceries_template = try z.querySelector(allocator, doc, "#groceries-page-template");
     const groceries_html = try z.innerTemplateHTML(allocator, z.elementToNode(groceries_template.?));
-    // const groceries_template = try css_engine.querySelector(body_node, "#groceries-page-template");
-    // const groceries_html = try z.innerTemplateHTML(allocator, groceries_template.?);
 
     const shopping_template = try z.querySelector(allocator, doc, "#shopping-list-template");
     const shopping_html = try z.innerTemplateHTML(allocator, z.elementToNode(shopping_template.?));
 
-    // const shopping_template = try css_engine.querySelector(body_node, "#shopping-list-template");
-    // const shopping_html = try z.innerTemplateHTML(allocator, shopping_template.?);
-
     const default_template = try z.querySelector(allocator, doc, "#item-details-default-template");
     const default_html = try z.innerTemplateHTML(allocator, z.elementToNode(default_template.?));
 
-    // const default_template = try css_engine.querySelector(body_node, "#item-details-default-template");
-    // const default_html = try z.innerTemplateHTML(allocator, default_template.?);
-
     const details_template = try z.querySelector(allocator, doc, "#item-details-template");
     const details_template_html = try z.innerTemplateHTML(allocator, z.elementToNode(details_template.?));
-    // const details_template = try css_engine.querySelector(body_node, "#item-details-template");
-    // const details_template_html = try z.innerTemplateHTML(allocator, details_template.?);
 
     const cart_item_template = try z.querySelector(allocator, doc, "#cart-item-template");
-
     const cart_item_template_html = try z.innerTemplateHTML(allocator, z.elementToNode(cart_item_template.?));
-    // const cart_item_template = try css_engine.querySelector(body_node, "#cart-item-template");
-    // const cart_item_template_html = try z.innerTemplateHTML(allocator, cart_item_template.?);
 
     return .{
         .grocery_items_template = grocery_item_template_html,
@@ -111,235 +268,7 @@ fn preloadTemplates(
     };
 }
 
-fn initMemoryDataSource(allocator: std.mem.Allocator) DataSource {
-    // For memory mode, we'll just use an empty HashMap since we'll generate HTML on-the-fly
-    // using the pre-loaded templates and hardcoded grocery_items data
-    return DataSource{ .memory = std.StringHashMap([]const u8).init(allocator) };
-}
-
-fn initSqliteDataSource() !DataSource {
-    var db = try sqlite.Db.init(.{
-        .mode = sqlite.Db.Mode{ .File = "grocery.db" },
-        .open_flags = .{
-            .write = true,
-            .create = true,
-        },
-    });
-
-    // Create table
-    const create_table_sql =
-        \\CREATE TABLE IF NOT EXISTS grocery_items (
-        \\    id INTEGER PRIMARY KEY AUTOINCREMENT,
-        \\    name TEXT NOT NULL UNIQUE,
-        \\    unit_price REAL NOT NULL
-        \\);
-    ;
-
-    try db.exec(create_table_sql, .{}, .{});
-
-    // Insert data from existing grocery_items array (ignore duplicates)
-    const insert_sql = "INSERT OR IGNORE INTO grocery_items (name, unit_price) VALUES (?1, ?2)";
-
-    for (grocery_items) |item| {
-        try db.exec(insert_sql, .{}, .{ item.name, item.unit_price });
-    }
-
-    return DataSource{ .sqlite = db };
-}
-
-fn queryItemFromSqlite(app: *App, item_name: []const u8) !?[]const u8 {
-    // SQLite implementation disabled due to API compatibility issues
-    _ = app;
-    _ = item_name;
-    return null;
-}
-
-pub fn runServer(
-    allocator: std.mem.Allocator,
-    html: []const u8,
-    css_engine: *z.CssSelectorEngine,
-    body_node: *z.DomNode,
-    use_sqlite: bool, // Configuration to choose data source
-) !void {
-    // Pre-load all templates at startup
-    const preloaded = try preloadTemplates(
-        allocator,
-        body_node,
-        css_engine,
-    );
-
-    // Initialize data source based on configuration
-    const data_source_type: DataSourceType = if (use_sqlite) .sqlite else .memory;
-    const data_source = switch (data_source_type) {
-        .memory => initMemoryDataSource(allocator),
-        .sqlite => try initSqliteDataSource(),
-    };
-
-    var _app = App{
-        .initial_html = html,
-        .allocator = allocator,
-        // .css_engine = css_engine,
-        .body_node = body_node,
-        .cart = .empty,
-        .preloaded_grocery_items_html = preloaded.grocery_items_template, // Raw template, not filled data
-        .preloaded_groceries_page_html = preloaded.groceries_page_html,
-        .preloaded_shopping_list_html = preloaded.shopping_list_html,
-        .preloaded_item_details_default_html = preloaded.item_details_default_html,
-        .preloaded_item_details_template = preloaded.item_details_template,
-        .preloaded_cart_item_template = preloaded.cart_item_template,
-        .data_source_type = data_source_type,
-        .data_source = data_source,
-    };
-
-    var server = try httpz.Server(*App).init(
-        allocator,
-        .{ .port = 8080 },
-        &_app,
-    );
-    defer {
-        // Cleanup pre-loaded templates
-        allocator.free(_app.preloaded_grocery_items_html);
-        allocator.free(_app.preloaded_groceries_page_html);
-        allocator.free(_app.preloaded_shopping_list_html);
-        allocator.free(_app.preloaded_item_details_default_html);
-        allocator.free(_app.preloaded_item_details_template);
-        allocator.free(_app.preloaded_cart_item_template);
-
-        // Cleanup data source
-        switch (_app.data_source) {
-            .memory => |*memory_map| {
-                memory_map.deinit();
-            },
-            .sqlite => |*db| {
-                db.deinit();
-            },
-        }
-
-        _app.cart.deinit(allocator);
-        server.stop();
-        server.deinit();
-    }
-
-    var router = try server.router(.{});
-    router.get("/", sendFullPage, .{});
-    router.get("/groceries", getGroceryList, .{});
-    router.get("/shopping-list", getShoppingList, .{});
-    router.get("/api/items", getItems, .{});
-    router.get("/api/cart", getCartItems, .{});
-    router.get("/item-details/default", getDefaultItemDetails, .{});
-    router.get("/api/item-details/:id", getItemDetails, .{});
-    router.post("/api/cart/add/:id", addToCart, .{});
-    router.delete("/api/cart/remove/:id", removeFromCart, .{});
-
-    // Optimized quantity-only endpoints
-    router.post("/api/cart/increase-quantity/:id", increaseQuantityOnly, .{});
-    router.post("/api/cart/decrease-quantity/:id", decreaseQuantityOnly, .{});
-
-    try server.listen();
-}
-
-fn getItems(app: *App, _: *httpz.Request, res: *httpz.Response) !void {
-    // Generate HTML using pre-loaded template with runtime data
-    var items_html: std.ArrayList(u8) = .empty;
-    defer items_html.deinit(app.allocator);
-
-    switch (app.data_source) {
-        .memory => {
-            for (grocery_items) |item| {
-                // Use the raw template and substitute data at runtime
-                const with_name = try std.mem.replaceOwned(u8, app.allocator, app.preloaded_grocery_items_html, "{name}", item.name);
-                defer app.allocator.free(with_name);
-
-                const price_str = try std.fmt.allocPrint(app.allocator, "{d:.2}", .{item.unit_price});
-                defer app.allocator.free(price_str);
-
-                const with_price = try std.mem.replaceOwned(u8, app.allocator, with_name, "{price}", price_str);
-                defer app.allocator.free(with_price);
-
-                const final_html = try std.mem.replaceOwned(u8, app.allocator, with_price, "{id}", item.name);
-                defer app.allocator.free(final_html);
-
-                try items_html.appendSlice(app.allocator, final_html);
-            }
-        },
-        .sqlite => {
-            // SQLite implementation disabled due to API compatibility issues
-            return error.NotImplemented;
-        },
-    }
-
-    res.status = 200;
-    res.header("Content-Type", "text/html; charset=utf-8");
-    const writer = res.writer();
-    try writer.writeAll(items_html.items);
-}
-
-fn getGroceryList(app: *App, _: *httpz.Request, res: *httpz.Response) !void {
-    res.status = 200;
-    res.header("Content-Type", "text/html; charset=utf-8");
-    res.body = app.preloaded_groceries_page_html;
-}
-fn getDefaultItemDetails(app: *App, _: *httpz.Request, res: *httpz.Response) !void {
-    res.status = 200;
-    res.header("Content-Type", "text/html; charset=utf-8");
-    res.body = app.preloaded_item_details_default_html;
-}
-
-fn getItemDetails(app: *App, req: *httpz.Request, res: *httpz.Response) !void {
-    const item_name = req.param("id") orelse "Unknown";
-
-    const item_html = switch (app.data_source) {
-        .memory => blk: {
-            // Find item in grocery_items and generate HTML using precomputed template
-            const grocery_item = for (grocery_items) |item| {
-                if (std.mem.eql(u8, item.name, item_name)) {
-                    break item;
-                }
-            } else {
-                break :blk null;
-            };
-
-            // Use preloaded template to generate HTML
-            const with_name = try std.mem.replaceOwned(u8, app.allocator, app.preloaded_item_details_template, "{name}", grocery_item.name);
-            defer app.allocator.free(with_name);
-
-            const price_str = try std.fmt.allocPrint(app.allocator, "{d:.2}", .{grocery_item.unit_price});
-            defer app.allocator.free(price_str);
-
-            const with_price = try std.mem.replaceOwned(u8, app.allocator, with_name, "{price}", price_str);
-            defer app.allocator.free(with_price);
-
-            const final_html = try std.mem.replaceOwned(u8, app.allocator, with_price, "{id}", grocery_item.name);
-
-            break :blk final_html;
-        },
-        .sqlite => blk: {
-            const result = queryItemFromSqlite(app, item_name) catch null;
-            break :blk result;
-        },
-    };
-
-    if (item_html) |html| {
-        res.status = 200;
-        res.header("Content-Type", "text/html; charset=utf-8");
-        res.body = html;
-
-        // Free generated HTML for both memory and SQLite modes
-        defer app.allocator.free(html);
-    } else {
-        res.status = 404;
-        res.header("Content-Type", "text/html; charset=utf-8");
-        res.body = "<div class=\"text-center text-red-500\"><h3>Item not found</h3></div>";
-    }
-}
-
-fn getShoppingList(app: *App, _: *httpz.Request, res: *httpz.Response) !void {
-    res.status = 200;
-    res.header("Content-Type", "text/html; charset=utf-8");
-    res.body = app.preloaded_shopping_list_html;
-}
-
-// Generic helper function to replace {} placeholders with ordered values
+/// Stack buffer template interpolation
 fn replaceTemplateToWriter(
     writer: anytype,
     template: []const u8,
@@ -347,171 +276,586 @@ fn replaceTemplateToWriter(
     price: f32,
     quantity: u32,
 ) !void {
-    // Stack-allocated buffers for formatting
+    // Stack-allocated buffers for formatting values
     var price_buf: [32]u8 = undefined;
     var quantity_buf: [16]u8 = undefined;
 
     const price_str = try std.fmt.bufPrint(&price_buf, "{d:.2}", .{price});
     const quantity_str = try std.fmt.bufPrint(&quantity_buf, "{d}", .{quantity});
 
-    // Values in order: name, price, name (for id), name (for id), name (for id), quantity, name (for id), name (for id), name (for id)
-    const values = [_][]const u8{ name, price_str, name, name, name, quantity_str, name, name, name };
-    var value_index: usize = 0;
+    // Calculate buffer size needed using template slice length (known at runtime)
+    const template_len = template.len;
+    const replacement_len = name.len * 7 + price_str.len + quantity_str.len;
+    const placeholder_len = 9 * 2; // 9 "{}" placeholders
+    const needed_buffer_size = template_len + replacement_len - placeholder_len;
 
-    // Single pass through template, replacing {} with ordered values
-    var start: usize = 0;
+    // Use reasonable buffer size based on typical template sizes
+    const max_buffer_size = 2048;
+    var output_buf: [max_buffer_size]u8 = undefined;
+
+    if (needed_buffer_size > max_buffer_size) {
+        return writer.print("Error: template too large for buffer", .{});
+    }
+
+    // Manual replacement with stack buffer
+    const values = [_][]const u8{ name, price_str, name, name, name, quantity_str, name, name, name };
+
+    var result_len: usize = 0;
+    var value_index: usize = 0;
     var i: usize = 0;
-    while (i < template.len) {
-        if (i + 1 < template.len and template[i] == '{' and template[i + 1] == '}') {
+
+    while (i + 1 < template.len) {
+        if (template[i] == '{' and template[i + 1] == '}') {
             if (value_index < values.len) {
-                try writer.writeAll(template[start..i]);
-                try writer.writeAll(values[value_index]);
+                const value = values[value_index];
+                @memcpy(output_buf[result_len .. result_len + value.len], value);
+                result_len += value.len;
                 value_index += 1;
-                i += 2;
-                start = i;
-            } else {
-                // No more values, skip this placeholder
-                i += 2;
-                start = i;
             }
+            i += 2;
         } else {
+            output_buf[result_len] = template[i];
+            result_len += 1;
             i += 1;
         }
     }
-    try writer.writeAll(template[start..]);
+
+    // Copy remaining template
+    while (i < template.len) {
+        output_buf[result_len] = template[i];
+        result_len += 1;
+        i += 1;
+    }
+
+    const result = output_buf[0..result_len];
+
+    // Single writeAll call
+    try writer.writeAll(result);
 }
 
-fn getCartItems(app: *App, _: *httpz.Request, res: *httpz.Response) !void {
-    // std.debug.print("Cart items requested!\n", .{});
+// Helper function to ensure session exists, redirect to "/" if not
+fn ensureSession(r: zap.Request) bool {
+    const session_id = getSessionId(r);
+    if (session_id != null) {
+        return true; // Session exists
+    }
 
-    if (app.cart.items.len == 0) {
-        res.status = 200;
-        res.header("Content-Type", "text/html; charset=utf-8");
-        const writer = res.writer();
-        try writer.writeAll("<p class=\"text-gray-600 text-center\">Your cart is empty.</p>");
+    // No session, redirect to root
+    r.setStatus(.found); // 302 redirect
+    r.setHeader("Location", "/") catch return false;
+    return false;
+}
+
+// Zap Handler Functions
+fn sendFullPage(r: zap.Request, app: *App) void {
+    // Check if session already exists
+    var session_id = getSessionId(r);
+
+    if (session_id == null) {
+        // Generate new session ID for first-time users
+        const new_session_id = generateSessionId(app.allocator) catch {
+            r.setStatus(.internal_server_error);
+            return;
+        };
+
+        // Set session cookie (expires in 24 hours)
+        const cookie_header = std.fmt.allocPrint(app.allocator,
+            "session_id={s}; HttpOnly; Path=/; Max-Age=86400", .{new_session_id}) catch {
+            app.allocator.free(new_session_id);
+            r.setStatus(.internal_server_error);
+            return;
+        };
+        defer app.allocator.free(cookie_header);
+
+        r.setHeader("Set-Cookie", cookie_header) catch return;
+        session_id = new_session_id;
+    }
+
+    // Initialize empty cart for this session (if not exists)
+    _ = getOrCreateSessionCart(app, session_id.?) catch {
+        r.setStatus(.internal_server_error);
+        return;
+    };
+
+    r.setStatus(.ok);
+    r.setContentType(.HTML) catch return;
+    r.sendBody(app.initial_html) catch return;
+}
+
+fn getGroceriesPage(r: zap.Request, app: *App) void {
+    // Ensure session exists, redirect to "/" if not
+    if (!ensureSession(r)) return;
+
+    r.setStatus(.ok);
+    r.setContentType(.HTML) catch return;
+    r.sendBody(app.preloaded_groceries_page_html) catch return;
+}
+
+fn getShoppingListPage(r: zap.Request, app: *App) void {
+    // Ensure session exists, redirect to "/" if not
+    if (!ensureSession(r)) return;
+
+    r.setStatus(.ok);
+    r.setContentType(.HTML) catch return;
+    r.sendBody(app.preloaded_shopping_list_html) catch return;
+}
+
+fn getItemDetailsDefault(r: zap.Request, app: *App) void {
+    // Ensure session exists, redirect to "/" if not
+    if (!ensureSession(r)) return;
+
+    r.setStatus(.ok);
+    r.setContentType(.HTML) catch return;
+    r.sendBody(app.preloaded_item_details_default_html) catch return;
+}
+
+fn getGroceryItems(r: zap.Request, app: *App) void {
+    // Ensure session exists, redirect to "/" if not
+    if (!ensureSession(r)) return;
+
+    var items_html: std.ArrayList(u8) = .empty;
+    defer items_html.deinit(app.allocator);
+
+    const writer = items_html.writer(app.allocator);
+
+    // Generate grocery items using ID-based URLs
+    for (grocery_items, 0..) |item, index| {
+        const item_id = @as(u32, @intCast(index));
+        writer.print(
+            \\<div class="bg-white rounded-lg p-4 shadow-md flex justify-between items-center transition-transform transform hover:scale-[1.02] cursor-pointer">
+            \\<div><span class="text-lg font-semibold text-gray-900">{s}</span><span class="text-sm text-gray-500 ml-2">${d:.2}</span></div>
+            \\<button class="px-4 py-2 bg-blue-500 text-white text-sm font-medium rounded-full hover:bg-blue-600 transition-colors" hx-post="/api/cart/add/{d}" hx-swap="none">Add to Cart</button>
+            \\</div>
+        , .{ item.name, item.unit_price, item_id }) catch {
+            r.setStatus(.internal_server_error);
+            return;
+        };
+    }
+
+    r.setStatus(.ok);
+    r.setContentType(.HTML) catch return;
+    r.sendBody(items_html.items) catch return;
+}
+
+fn getCartItems(r: zap.Request, app: *App) void {
+    // Get or create session cart
+    const session_id = getSessionId(r) orelse blk: {
+        // Generate new session ID if none exists
+        const new_session_id = generateSessionId(app.allocator) catch {
+            r.setStatus(.internal_server_error);
+            return;
+        };
+        // Set as cookie in response
+        r.setCookie(.{
+            .name = "session_id",
+            .value = new_session_id,
+            .http_only = true,
+            .max_age_s = 3600, // 1 hour
+        }) catch {};
+        break :blk new_session_id;
+    };
+
+    const session_cart = getOrCreateSessionCart(app, session_id) catch {
+        r.setStatus(.internal_server_error);
+        return;
+    };
+
+    if (session_cart.items.len == 0) {
+        r.setStatus(.ok);
+        r.setContentType(.HTML) catch return;
+        r.sendBody("<p class=\"text-gray-600 text-center\">Your cart is empty.</p>") catch return;
         return;
     }
 
-    res.status = 200;
-    res.header("Content-Type", "text/html; charset=utf-8");
-    const writer = res.writer();
+    var cart_html: std.ArrayList(u8) = .empty;
+    defer cart_html.deinit(app.allocator);
 
-    // Render each cart item using the pre-loaded template
-    for (app.cart.items) |cart_item| {
-        try replaceTemplateToWriter(
+    const writer = cart_html.writer(app.allocator);
+
+    // Render each cart item using the optimized template replacement
+    for (session_cart.items) |cart_item| {
+        replaceTemplateToWriter(
             writer,
             app.preloaded_cart_item_template,
             cart_item.name,
             cart_item.price,
             cart_item.quantity,
-        );
+        ) catch {
+            r.setStatus(.internal_server_error);
+            return;
+        };
     }
+
+    r.setStatus(.ok);
+    r.setContentType(.HTML) catch return;
+    r.sendBody(cart_html.items) catch return;
 }
 
-fn addToCart(app: *App, req: *httpz.Request, res: *httpz.Response) !void {
-    const item_name = req.param("id") orelse return;
-    // std.debug.print("Adding to cart: {s}\n", .{item_name});
+fn getItemDetails(r: zap.Request, app: *App) void {
+    const path = r.path orelse {
+        r.setStatus(.bad_request);
+        return;
+    };
 
-    // Find the item in grocery list to get price
-    const grocery_item = for (grocery_items) |item| {
+    const prefix = "/api/item-details/";
+    if (!std.mem.startsWith(u8, path, prefix)) {
+        r.setStatus(.bad_request);
+        return;
+    }
+
+    const item_name_encoded = path[prefix.len..];
+    const item_name = urlDecode(app.allocator, item_name_encoded) catch {
+        r.setStatus(.bad_request);
+        return;
+    };
+    defer app.allocator.free(item_name);
+
+    // Find the item in grocery_items
+    for (grocery_items) |item| {
         if (std.mem.eql(u8, item.name, item_name)) {
-            break item;
+            var details_html: std.ArrayList(u8) = .empty;
+            defer details_html.deinit(app.allocator);
+
+            const writer = details_html.writer(app.allocator);
+            writer.print(
+                \\<div class="text-center">
+                \\<h3 class="text-2xl font-bold text-gray-800 mb-4">{s}</h3>
+                \\<div class="w-24 h-24 bg-gray-200 rounded-full mx-auto mb-4 flex items-center justify-center">
+                \\<svg class="w-12 h-12 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                \\<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 11V7a4 4 0 00-8 0v4M5 9h14l1 12H4L5 9z"></path>
+                \\</svg>
+                \\</div>
+                \\<div class="bg-blue-50 rounded-lg p-6 mb-6">
+                \\<p class="text-3xl font-bold text-blue-600">${d:.2}</p>
+                \\<p class="text-gray-600 mt-2">per unit</p>
+                \\</div>
+                \\<div class="space-y-3">
+                \\<button class="w-full bg-blue-600 text-white py-3 px-6 rounded-lg hover:bg-blue-700 transition-colors font-semibold" hx-post="/api/cart/add/{s}" hx-swap="none">Add to Cart</button>
+                \\</div>
+                \\</div>
+            , .{ item.name, item.unit_price, item.name }) catch {
+                r.setStatus(.internal_server_error);
+                return;
+            };
+
+            r.setStatus(.ok);
+            r.setContentType(.HTML) catch return;
+            r.sendBody(details_html.items) catch return;
+            return;
         }
-    } else {
-        res.status = 404;
+    }
+
+    r.setStatus(.not_found);
+}
+
+fn addToCart(r: zap.Request, app: *App) void {
+    const path = r.path orelse {
+        r.setStatus(.bad_request);
+        return;
+    };
+
+    const prefix = "/api/cart/add/";
+    if (!std.mem.startsWith(u8, path, prefix)) {
+        r.setStatus(.bad_request);
+        return;
+    }
+
+    const item_id_str = path[prefix.len..];
+    const item_id = std.fmt.parseInt(u32, item_id_str, 10) catch {
+        r.setStatus(.bad_request);
+        return;
+    };
+
+    // Find grocery item using data abstraction layer
+    const grocery_item = getItemById(app.data_source, item_id) orelse {
+        r.setStatus(.not_found);
+        return;
+    };
+
+    // Get or create session cart
+    const session_id = getSessionId(r) orelse blk: {
+        // Generate new session ID if none exists
+        const new_session_id = generateSessionId(app.allocator) catch {
+            r.setStatus(.internal_server_error);
+            return;
+        };
+        // Set as cookie in response
+        r.setCookie(.{
+            .name = "session_id",
+            .value = new_session_id,
+            .http_only = true,
+            .max_age_s = 3600, // 1 hour
+        }) catch {};
+        break :blk new_session_id;
+    };
+
+    const session_cart = getOrCreateSessionCart(app, session_id) catch {
+        r.setStatus(.internal_server_error);
         return;
     };
 
     // Check if item already in cart
-    for (app.cart.items) |*cart_item| {
-        if (std.mem.eql(u8, cart_item.name, item_name)) {
+    for (session_cart.items) |*cart_item| {
+        if (cart_item.item_id == item_id) {
             cart_item.quantity += 1;
-            res.status = 200;
+            r.setStatus(.ok);
             return;
         }
     }
 
     // Add new item to cart
-    try app.cart.append(app.allocator, CartItem{
+    session_cart.append(app.allocator, CartItem{
+        .item_id = item_id,
         .name = grocery_item.name,
         .price = grocery_item.unit_price,
         .quantity = 1,
-    });
+    }) catch {
+        r.setStatus(.internal_server_error);
+        return;
+    };
 
-    res.status = 200;
+
+    r.setStatus(.ok);
 }
 
-fn removeFromCart(app: *App, req: *httpz.Request, res: *httpz.Response) !void {
-    const item_name = req.param("id") orelse return;
+fn increaseQuantityOnly(r: zap.Request, app: *App) void {
+    const path = r.path orelse {
+        r.setStatus(.bad_request);
+        return;
+    };
 
-    for (app.cart.items, 0..) |cart_item, i| {
-        if (std.mem.eql(u8, cart_item.name, item_name)) {
-            _ = app.cart.orderedRemove(i);
-            break;
-        }
+    const prefix = "/api/cart/increase-quantity/";
+    if (!std.mem.startsWith(u8, path, prefix)) {
+        r.setStatus(.bad_request);
+        return;
     }
 
-    // Return updated cart content
-    try getCartItems(app, req, res);
-}
+    const item_id_str = path[prefix.len..];
+    const item_id = std.fmt.parseInt(u32, item_id_str, 10) catch {
+        r.setStatus(.bad_request);
+        return;
+    };
 
-pub fn sendFullPage(app: *App, _: *httpz.Request, res: *httpz.Response) !void {
-    res.status = 200;
-    res.header("Content-Type", "text/html; charset=utf-8");
-    res.body = app.initial_html;
-}
+    // Validate that the item_id exists
+    if (getItemById(app.data_source, item_id) == null) {
+        r.setStatus(.not_found);
+        return;
+    }
 
-// Optimized quantity-only endpoints - return just the quantity number
-fn increaseQuantityOnly(app: *App, req: *httpz.Request, res: *httpz.Response) !void {
-    const item_name = req.param("id") orelse return;
+    // Get session cart
+    const session_id = getSessionId(r) orelse {
+        r.setStatus(.bad_request); // No session means no cart
+        return;
+    };
 
-    for (app.cart.items) |*cart_item| {
-        if (std.mem.eql(u8, cart_item.name, item_name)) {
+    const session_cart = getOrCreateSessionCart(app, session_id) catch {
+        r.setStatus(.internal_server_error);
+        return;
+    };
+
+
+    for (session_cart.items) |*cart_item| {
+        if (cart_item.item_id == item_id) {
             cart_item.quantity += 1;
 
             // Return just the quantity number
-            res.status = 200;
-            res.header("Content-Type", "text/html; charset=utf-8");
-            const writer = res.writer();
-            try writer.print("{d}", .{cart_item.quantity});
+            var quantity_buf: [16]u8 = undefined;
+            const quantity_str = std.fmt.bufPrint(&quantity_buf, "{d}", .{cart_item.quantity}) catch {
+                r.setStatus(.internal_server_error);
+                return;
+            };
+
+            r.setStatus(.ok);
+            r.setContentType(.HTML) catch return;
+            r.sendBody(quantity_str) catch return;
             return;
         }
     }
 
-    // Item not found - return current quantity (shouldn't happen)
-    res.status = 404;
+    r.setStatus(.not_found);
 }
 
-fn decreaseQuantityOnly(app: *App, req: *httpz.Request, res: *httpz.Response) !void {
-    const item_name = req.param("id") orelse return;
+fn decreaseQuantityOnly(r: zap.Request, app: *App) void {
+    const path = r.path orelse {
+        r.setStatus(.bad_request);
+        return;
+    };
 
-    for (app.cart.items, 0..) |*cart_item, i| {
-        if (std.mem.eql(u8, cart_item.name, item_name)) {
+    const prefix = "/api/cart/decrease-quantity/";
+    if (!std.mem.startsWith(u8, path, prefix)) {
+        r.setStatus(.bad_request);
+        return;
+    }
+
+    const item_id_str = path[prefix.len..];
+    const item_id = std.fmt.parseInt(u32, item_id_str, 10) catch {
+        r.setStatus(.bad_request);
+        return;
+    };
+
+    // Validate that the item_id exists
+    if (getItemById(app.data_source, item_id) == null) {
+        r.setStatus(.not_found);
+        return;
+    }
+
+    // Get session cart
+    const session_id = getSessionId(r) orelse {
+        r.setStatus(.bad_request); // No session means no cart
+        return;
+    };
+
+    const session_cart = getOrCreateSessionCart(app, session_id) catch {
+        r.setStatus(.internal_server_error);
+        return;
+    };
+
+    for (session_cart.items, 0..) |*cart_item, i| {
+        if (cart_item.item_id == item_id) {
             if (cart_item.quantity > 1) {
                 cart_item.quantity -= 1;
 
                 // Return just the quantity number
-                res.status = 200;
-                res.header("Content-Type", "text/html; charset=utf-8");
-                const writer = res.writer();
-                try writer.print("{d}", .{cart_item.quantity});
+                var quantity_buf: [16]u8 = undefined;
+                const quantity_str = std.fmt.bufPrint(&quantity_buf, "{d}", .{cart_item.quantity}) catch {
+                    r.setStatus(.internal_server_error);
+                    return;
+                };
+
+                r.setStatus(.ok);
+                r.setContentType(.HTML) catch return;
+                r.sendBody(quantity_str) catch return;
                 return;
             } else {
                 // Remove item if quantity becomes 0
-                _ = app.cart.orderedRemove(i);
+                _ = session_cart.orderedRemove(i);
 
-                // For zero quantity, we need to trigger full cart refresh
-                // by returning an HTMX response that refreshes the whole cart
-                res.status = 200;
-                res.header("Content-Type", "text/html; charset=utf-8");
-                res.header("HX-Trigger", "refresh-cart");
-                const writer = res.writer();
-                try writer.writeAll("0");
+                r.setStatus(.ok);
+                r.setContentType(.HTML) catch return;
+                r.sendBody("0") catch return;
                 return;
             }
         }
     }
 
-    // Item not found
-    res.status = 404;
+    r.setStatus(.not_found);
+}
+
+fn removeFromCart(r: zap.Request, app: *App) void {
+    const path = r.path orelse {
+        r.setStatus(.bad_request);
+        return;
+    };
+
+    const prefix = "/api/cart/remove/";
+    if (!std.mem.startsWith(u8, path, prefix)) {
+        r.setStatus(.bad_request);
+        return;
+    }
+
+    const item_id_str = path[prefix.len..];
+    const item_id = std.fmt.parseInt(u32, item_id_str, 10) catch {
+        r.setStatus(.bad_request);
+        return;
+    };
+
+    // Validate that the item_id exists
+    if (getItemById(app.data_source, item_id) == null) {
+        r.setStatus(.not_found);
+        return;
+    }
+
+    // Get session cart
+    const session_id = getSessionId(r) orelse {
+        r.setStatus(.bad_request); // No session means no cart
+        return;
+    };
+
+    const session_cart = getOrCreateSessionCart(app, session_id) catch {
+        r.setStatus(.internal_server_error);
+        return;
+    };
+
+    for (session_cart.items, 0..) |cart_item, i| {
+        if (cart_item.item_id == item_id) {
+            _ = session_cart.orderedRemove(i);
+            break;
+        }
+    }
+
+    // Return updated cart content by calling getCartItems
+    getCartItems(r, app);
+}
+
+// Main request handler function that routes requests to appropriate handlers
+fn on_request(r: zap.Request) !void {
+    const path = r.path orelse {
+        r.setStatus(.bad_request);
+        r.sendBody("No path") catch return;
+        return;
+    };
+
+    const method = r.methodAsEnum();
+
+    // Route handling
+    if (std.mem.eql(u8, path, "/")) {
+        if (method == .GET) {
+            sendFullPage(r, global_app);
+            return;
+        }
+    } else if (std.mem.eql(u8, path, "/groceries")) {
+        if (method == .GET) {
+            getGroceriesPage(r, global_app);
+            return;
+        }
+    } else if (std.mem.eql(u8, path, "/shopping-list")) {
+        if (method == .GET) {
+            getShoppingListPage(r, global_app);
+            return;
+        }
+    } else if (std.mem.eql(u8, path, "/api/items")) {
+        if (method == .GET) {
+            getGroceryItems(r, global_app);
+            return;
+        }
+    } else if (std.mem.eql(u8, path, "/api/cart")) {
+        if (method == .GET) {
+            getCartItems(r, global_app);
+            return;
+        }
+    } else if (std.mem.eql(u8, path, "/item-details/default")) {
+        if (method == .GET) {
+            getItemDetailsDefault(r, global_app);
+            return;
+        }
+    } else if (std.mem.startsWith(u8, path, "/api/item-details/")) {
+        if (method == .GET) {
+            getItemDetails(r, global_app);
+            return;
+        }
+    } else if (std.mem.startsWith(u8, path, "/api/cart/add/")) {
+        if (method == .POST) {
+            addToCart(r, global_app);
+            return;
+        }
+    } else if (std.mem.startsWith(u8, path, "/api/cart/increase-quantity/")) {
+        if (method == .POST) {
+            increaseQuantityOnly(r, global_app);
+            return;
+        }
+    } else if (std.mem.startsWith(u8, path, "/api/cart/decrease-quantity/")) {
+        if (method == .POST) {
+            decreaseQuantityOnly(r, global_app);
+            return;
+        }
+    } else if (std.mem.startsWith(u8, path, "/api/cart/remove/")) {
+        if (method == .DELETE) {
+            removeFromCart(r, global_app);
+            return;
+        }
+    }
+
+    // Default 404 response
+    r.setStatus(.not_found);
+    r.sendBody("404 - Not Found") catch return;
 }

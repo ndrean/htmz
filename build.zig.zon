@@ -44,6 +44,10 @@
             .url = "git+https://github.com/vrischmann/zig-sqlite#6d90ee900d186a7fbb6066f28ee13beeaf8be345",
             .hash = "sqlite-3.48.0-F2R_a5yODgDFvwwsytm7ZONcSqYBo3qv1PmXOtw3tqLA",
         },
+        .zap = .{
+            .url = "git+https://github.com/zigzap/zap?ref=v0.11.0#66c5dc42c781bbb8a9100afda3c7e69ee96eddf3",
+            .hash = "zap-0.10.6-GoeB8xCEJABLgoiZjWZMMT5TsoZ5OO2EZe6j24RTUYEH",
+        },
     },
     .paths = .{
         "build.zig",

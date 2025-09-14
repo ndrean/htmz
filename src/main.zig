@@ -1,16 +1,22 @@
 const std = @import("std");
+const builtin = @import("builtin");
 const htmz = @import("htmz");
 const httpz = @import("htmz").httpz;
 const z = @import("htmz").z;
 const initial_html = @import("index.zig").index_html;
 
 pub fn main() !void {
-    // var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    // const allocator = gpa.allocator();
-    const allocator = std.heap.c_allocator;
-    // Prints to stderr, ignoring potential errors.
-    // std.debug.print("All your {s} are belong to us.\n", .{"codebase"});
-    // try htmz.bPrint(42);
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    const allocator, const is_debug =
+        switch (builtin.mode) {
+            .Debug, .ReleaseSafe => .{ gpa.allocator(), true },
+            .ReleaseFast, .ReleaseSmall => .{ std.heap.c_allocator, false },
+        };
+
+    defer if (is_debug) {
+        std.debug.print("\n\nLeaks detected: {}\n\n", .{gpa.deinit() != .ok});
+    };
+
     const doc = try z.createDocFromString(initial_html);
     const html_node = z.documentRoot(doc).?;
     const html_elt = z.nodeToElement(html_node).?;
@@ -23,13 +29,13 @@ pub fn main() !void {
     );
     const normed_html = try z.outerHTML(allocator, html_elt);
 
-    std.debug.print("intial: {d}, normalized: {d}\n", .{ initial_html.len, normed_html.len });
+    // std.debug.print("intial: {d}, normalized: {d}\n", .{ initial_html.len, normed_html.len });
     defer z.destroyDocument(doc);
 
     var css_engine = try z.createCssEngine(allocator);
     defer css_engine.deinit();
 
-    try z.prettyPrint(allocator, html_node);
+    // try z.prettyPrint(allocator, html_node);
 
     // Configuration: set to true to use SQLite, false to use memory
     const use_sqlite = false; // SQLite API compatibility issues - using optimized memory mode

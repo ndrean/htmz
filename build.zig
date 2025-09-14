@@ -28,6 +28,11 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = optimize,
     });
+    const zap = b.dependency("zap", .{
+        .target = target,
+        .optimize = optimize,
+        .openssl = false, // disable TLS for now
+    });
     const zexplorer = b.dependency("zexplorer", .{
         .target = target,
         .optimize = optimize,
@@ -38,6 +43,7 @@ pub fn build(b: *std.Build) void {
     });
 
     mod.addImport("httpz", httpz.module("httpz"));
+    mod.addImport("zap", zap.module("zap"));
     mod.addImport("zexplorer", zexplorer.module("zexplorer"));
     mod.addImport("sqlite", sqlite.module("sqlite"));
 

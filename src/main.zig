@@ -1,27 +1,44 @@
 const std = @import("std");
 const htmz = @import("htmz");
+const httpz = @import("htmz").httpz;
+const z = @import("htmz").z;
+const initial_html = @import("index.zig").index_html;
 
 pub fn main() !void {
+    // var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    // const allocator = gpa.allocator();
+    const allocator = std.heap.c_allocator;
     // Prints to stderr, ignoring potential errors.
-    std.debug.print("All your {s} are belong to us.\n", .{"codebase"});
-    try htmz.bufferedPrint();
-}
+    // std.debug.print("All your {s} are belong to us.\n", .{"codebase"});
+    // try htmz.bPrint(42);
+    const doc = try z.createDocFromString(initial_html);
+    const html_node = z.documentRoot(doc).?;
+    const html_elt = z.nodeToElement(html_node).?;
+    const body_node = z.bodyNode(doc).?;
 
-test "simple test" {
-    const gpa = std.testing.allocator;
-    var list: std.ArrayList(i32) = .empty;
-    defer list.deinit(gpa); // Try commenting this out and see if zig detects the memory leak!
-    try list.append(gpa, 42);
-    try std.testing.expectEqual(@as(i32, 42), list.pop());
-}
+    try z.normalizeDOMwithOptions(
+        allocator,
+        html_elt,
+        .{ .skip_comments = true },
+    );
+    const normed_html = try z.outerHTML(allocator, html_elt);
 
-test "fuzz example" {
-    const Context = struct {
-        fn testOne(context: @This(), input: []const u8) anyerror!void {
-            _ = context;
-            // Try passing `--fuzz` to `zig build test` and see if it manages to fail this test case!
-            try std.testing.expect(!std.mem.eql(u8, "canyoufindme", input));
-        }
-    };
-    try std.testing.fuzz(Context{}, Context.testOne, .{});
+    std.debug.print("intial: {d}, normalized: {d}\n", .{ initial_html.len, normed_html.len });
+    defer z.destroyDocument(doc);
+
+    var css_engine = try z.createCssEngine(allocator);
+    defer css_engine.deinit();
+
+    try z.prettyPrint(allocator, html_node);
+
+    // Configuration: set to true to use SQLite, false to use memory
+    const use_sqlite = false; // SQLite API compatibility issues - using optimized memory mode
+
+    try htmz.runServer(
+        allocator,
+        normed_html,
+        &css_engine,
+        body_node,
+        use_sqlite,
+    );
 }

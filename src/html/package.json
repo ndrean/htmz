@@ -1,0 +1,14 @@
+{
+  "name": "htmz",
+  "private": true,
+  "scripts": {
+    "build:css": "tailwindcss -i input.css -o index.css --minify",
+    "build:zig": "zig build run-jwt",
+    "build:zig:fast": "zig build run-jwt --release=fast"
+  },
+  "packageManager": "pnpm@10.16.1",
+  "devDependencies": {
+    "@tailwindcss/cli": "^4.1.13",
+    "tailwindcss": "^4.1.13"
+  }
+}

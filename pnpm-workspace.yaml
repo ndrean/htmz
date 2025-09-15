@@ -1,0 +1,6 @@
+packages:
+  - src/html
+
+onlyBuiltDependencies:
+  - '@parcel/watcher'
+  - '@tailwindcss/oxide'

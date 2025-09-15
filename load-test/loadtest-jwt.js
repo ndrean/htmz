@@ -26,7 +26,7 @@ export const options = {
 };
 
 const SECRET_KEY = "your-super-secret-key-12345";
-const BASE_URL = "http://localhost:8081"; // JWT server port
+const BASE_URL = "http://localhost:8080"; // JWT server port
 
 const itemIds = [0, 1, 2, 3, 4, 5, 6, 7];
 
@@ -62,35 +62,44 @@ export default function () {
 
   const randomItemId = itemIds[Math.floor(Math.random() * itemIds.length)];
 
-  // Headers with current JWT
-  const headers = {
-    "Authorization": `Bearer ${currentJWT}`,
+  // Helper function to update JWT token from response cookies
+  function updateJWTFromResponse(response) {
+    const newToken = response.headers["Set-Cookie"];
+    if (newToken) {
+      const match = newToken.match(/jwt_token=([^;]+)/);
+      if (match) {
+        currentJWT = match[1];
+        return true;
+      }
+    }
+    return false;
+  }
+
+  // Headers with current JWT as cookie
+  const headers = () => ({
+    "Cookie": `jwt_token=${currentJWT}`,
     "Content-Type": "application/json",
-  };
+  });
 
   // 1. Add item to cart
   let response = http.post(
     `${BASE_URL}/api/cart/add/${randomItemId}`,
     null,
-    { headers }
+    { headers: headers() }
   );
 
   check(response, {
     "add to cart status 200": (r) => r.status === 200,
   });
 
-  // Update JWT from response header if provided
-  const newToken = response.headers["X-Jwt-Token"];
-  if (newToken) {
-    currentJWT = newToken;
-    headers["Authorization"] = `Bearer ${currentJWT}`;
-  }
+  // Update JWT from response cookie if provided
+  updateJWTFromResponse(response);
 
   // 2. Increase quantity
   response = http.post(
     `${BASE_URL}/api/cart/increase-quantity/${randomItemId}`,
     null,
-    { headers }
+    { headers: headers() }
   );
 
   check(response, {
@@ -100,17 +109,13 @@ export default function () {
   });
 
   // Update JWT again
-  const newToken2 = response.headers["X-Jwt-Token"];
-  if (newToken2) {
-    currentJWT = newToken2;
-    headers["Authorization"] = `Bearer ${currentJWT}`;
-  }
+  updateJWTFromResponse(response);
 
   // 3. Decrease quantity
   response = http.post(
     `${BASE_URL}/api/cart/decrease-quantity/${randomItemId}`,
     null,
-    { headers }
+    { headers: headers() }
   );
 
   check(response, {
@@ -118,17 +123,13 @@ export default function () {
   });
 
   // Update JWT again
-  const newToken3 = response.headers["X-Jwt-Token"];
-  if (newToken3) {
-    currentJWT = newToken3;
-    headers["Authorization"] = `Bearer ${currentJWT}`;
-  }
+  updateJWTFromResponse(response);
 
   // 4. Remove from cart
   response = http.del(
     `${BASE_URL}/api/cart/remove/${randomItemId}`,
     null,
-    { headers }
+    { headers: headers() }
   );
 
   check(response, {
@@ -136,10 +137,7 @@ export default function () {
   });
 
   // Final JWT update
-  const newToken4 = response.headers["X-Jwt-Token"];
-  if (newToken4) {
-    currentJWT = newToken4;
-  }
+  updateJWTFromResponse(response);
 
   // Minimal pause for high throughput
   sleep(0.1);

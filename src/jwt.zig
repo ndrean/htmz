@@ -101,13 +101,49 @@ pub fn verifyJWT(allocator: std.mem.Allocator, token: []const u8) !JWTPayload {
     defer allocator.free(payload_json);
 
     const parsed = try std.json.parseFromSlice(JWTPayload, allocator, payload_json, .{});
-    defer parsed.deinit();
+    // Don't defer deinit here - the caller needs the memory
+    // We need to clone the strings to avoid use-after-free
 
-    // Check expiration
+    // Check expiration first
     const now = std.time.timestamp();
     if (parsed.value.exp < now) {
+        parsed.deinit();
         return error.TokenExpired;
     }
 
-    return parsed.value;
+    // Clone the user_id string to avoid use-after-free
+    const user_id_clone = try allocator.dupe(u8, parsed.value.user_id);
+
+    // Clone cart items
+    const cart_clone = try allocator.alloc(CartItem, parsed.value.cart.len);
+    for (parsed.value.cart, 0..) |item, i| {
+        cart_clone[i] = CartItem{
+            .id = item.id,
+            .name = try allocator.dupe(u8, item.name),
+            .quantity = item.quantity,
+            .price = item.price,
+        };
+    }
+
+    const result = JWTPayload{
+        .user_id = user_id_clone,
+        .cart = cart_clone,
+        .exp = parsed.value.exp,
+    };
+
+    // Now we can safely free the parsed data
+    parsed.deinit();
+
+    return result;
+}
+
+pub fn deinitPayload(allocator: std.mem.Allocator, payload: JWTPayload) void {
+    // Free the cloned user_id
+    allocator.free(payload.user_id);
+
+    // Free the cloned cart items
+    for (payload.cart) |item| {
+        allocator.free(item.name);
+    }
+    allocator.free(payload.cart);
 }

@@ -230,6 +230,32 @@ pub fn runServer(
     zap.start(.{ .threads = 2, .workers = 2 });
 }
 
+pub fn runJWTServer(
+    allocator: std.mem.Allocator,
+    initial_html: []const u8,
+    css_engine: ?*z.CssSelectorEngine,
+    body_node: ?*z.DomNode,
+    use_sqlite: bool,
+) !void {
+    _ = css_engine;
+    _ = body_node;
+    // Create dummy CSS engine and body node for JWT server
+    var dummy_css_engine = z.CssSelectorEngine.init(allocator);
+    defer dummy_css_engine.deinit();
+
+    var dummy_dom = z.Dom.init(allocator);
+    defer dummy_dom.deinit();
+
+    const body_element = z.DomNode{ .element = z.Element{
+        .tag_name = "body",
+        .attributes = &[_]z.Attribute{},
+        .children = &[_]*z.DomNode{},
+    }};
+
+    const jwt_impl = @import("root_jwt_complete.zig");
+    try jwt_impl.runServer(allocator, initial_html, &dummy_css_engine, @constCast(&body_element), use_sqlite);
+}
+
 /// extract all the raw templates from the initial HTML
 fn preloadTemplates(allocator: std.mem.Allocator, body_node: *z.DomNode, _: *z.CssSelectorEngine) !struct {
     grocery_items_template: []const u8,
@@ -359,8 +385,7 @@ fn sendFullPage(r: zap.Request, app: *App) void {
         };
 
         // Set session cookie (expires in 24 hours)
-        const cookie_header = std.fmt.allocPrint(app.allocator,
-            "session_id={s}; HttpOnly; Path=/; Max-Age=86400", .{new_session_id}) catch {
+        const cookie_header = std.fmt.allocPrint(app.allocator, "session_id={s}; HttpOnly; Path=/; Max-Age=86400", .{new_session_id}) catch {
             app.allocator.free(new_session_id);
             r.setStatus(.internal_server_error);
             return;
@@ -614,7 +639,6 @@ fn addToCart(r: zap.Request, app: *App) void {
         return;
     };
 
-
     r.setStatus(.ok);
 }
 
@@ -652,7 +676,6 @@ fn increaseQuantityOnly(r: zap.Request, app: *App) void {
         r.setStatus(.internal_server_error);
         return;
     };
-
 
     for (session_cart.items) |*cart_item| {
         if (cart_item.item_id == item_id) {
@@ -715,7 +738,7 @@ fn decreaseQuantityOnly(r: zap.Request, app: *App) void {
             if (cart_item.quantity > 1) {
                 cart_item.quantity -= 1;
 
-                // Return just the quantity number
+                // Return just the quantity number as a character
                 var quantity_buf: [16]u8 = undefined;
                 const quantity_str = std.fmt.bufPrint(&quantity_buf, "{d}", .{cart_item.quantity}) catch {
                     r.setStatus(.internal_server_error);

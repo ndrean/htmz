@@ -4,15 +4,15 @@ import { check } from "k6";
 
 export const options = {
   scenarios: {
-    extreme_stress: {
+    high_stress: {
       executor: "ramping-vus",
       startVUs: 0,
       stages: [
-        { duration: "10s", target: 2500 }, // Ramp to 2500 VUs (250 VUs/sec)
-        { duration: "10s", target: 5000 }, // Ramp to 5000 VUs (250 VUs/sec)
-        { duration: "10s", target: 7500 }, // Ramp to 7500 VUs (250 VUs/sec)
-        { duration: "10s", target: 10000 }, // Ramp to 10000 VUs (250 VUs/sec)
-        { duration: "20s", target: 12000 }, // Hold at 10000 VUs
+        // { duration: "10s", target: 5000 }, // Ramp to 5000 VUs (500 VUs/sec)
+        { duration: "10s", target: 10_000 }, // Ramp to 10000 VUs (1000 VUs/sec)
+        // { duration: "10s", target: 12000 }, // Ramp to 7500 VUs (250 VUs/sec)
+        { duration: "30s", target: 12500 }, // Ramp to 10000 VUs (250 VUs/sec)
+        // { duration: "10s", target: 12500 }, // Hold at 12500 VUs
         { duration: "10s", target: 0 }, // Ramp down
       ],
     },
@@ -103,9 +103,10 @@ export default function () {
 
 export function handleSummary(data) {
   const metrics = data.metrics;
+  // console.log(metrics);
 
   console.log(`
-=== EXTREME STRESS TEST RESULTS ===
+=== HIGH STRESS TEST RESULTS ===
 Peak VUs: ${metrics.vus_max.values.max}
 Total Requests: ${metrics.http_reqs.values.count}
 Failed Requests: ${(metrics.http_req_failed.values.rate * 100).toFixed(2)}%

@@ -5,6 +5,43 @@ const httpz = @import("htmz").httpz;
 const z = @import("htmz").z;
 const initial_html = @import("index.zig").index_html;
 
+fn preloadTemplates(allocator: std.mem.Allocator, body_node: *z.DomNode, _: *z.CssSelectorEngine) !struct {
+    grocery_items_template: []const u8,
+    groceries_page_html: []const u8,
+    shopping_list_html: []const u8,
+    item_details_default_html: []const u8,
+    item_details_template: []const u8,
+    cart_item_template: []const u8,
+} {
+    const doc = z.ownerDocument(body_node);
+    const item_template = try z.querySelector(allocator, doc, "#grocery-item-template");
+    const grocery_item_template_html = try z.innerTemplateHTML(allocator, z.elementToNode(item_template.?));
+
+    const groceries_template = try z.querySelector(allocator, doc, "#groceries-page-template");
+    const groceries_html = try z.innerTemplateHTML(allocator, z.elementToNode(groceries_template.?));
+
+    const shopping_template = try z.querySelector(allocator, doc, "#shopping-list-template");
+    const shopping_html = try z.innerTemplateHTML(allocator, z.elementToNode(shopping_template.?));
+
+    const default_template = try z.querySelector(allocator, doc, "#item-details-default-template");
+    const default_html = try z.innerTemplateHTML(allocator, z.elementToNode(default_template.?));
+
+    const details_template = try z.querySelector(allocator, doc, "#item-details-template");
+    const details_template_html = try z.innerTemplateHTML(allocator, z.elementToNode(details_template.?));
+
+    const cart_item_template = try z.querySelector(allocator, doc, "#cart-item-template");
+    const cart_item_template_html = try z.innerTemplateHTML(allocator, z.elementToNode(cart_item_template.?));
+
+    return .{
+        .grocery_items_template = grocery_item_template_html,
+        .groceries_page_html = groceries_html,
+        .shopping_list_html = shopping_html,
+        .item_details_default_html = default_html,
+        .item_details_template = details_template_html,
+        .cart_item_template = cart_item_template_html,
+    };
+}
+
 pub fn main() !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     const allocator, const is_debug =

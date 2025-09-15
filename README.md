@@ -42,6 +42,8 @@ sequenceDiagram
 
 ## Stress test
 
+1) First old test
+
 k6 run load-test/loadtest.js
 
          /\      Grafana   /‾‾/  
@@ -81,4 +83,37 @@ k6 run load-test/loadtest.js
 
 
 running (0m32.9s), 0000/6000 VUs, 78956 complete and 0 interrupted iterations
+
 default ✓ [======================================] 6000 VUs  30s
+
+k6 run load-test/loadtest.js`
+
+1) 
+
+         /\      Grafana   /‾‾/  
+    /\  /  \     |\  __   /  /   
+   /  \/    \    | |/ /  /   ‾‾\ 
+  /          \   |   (  |  (‾)  |
+ / __________ \  |_|\_\  \_____/ 
+
+     execution: local
+        script: load-test/loadtest.js
+        output: -
+
+     scenarios: (100.00%) 1 scenario, 12500 max VUs, 1m10s max duration (incl. graceful stop):
+              * high_stress: Up to 12500 looping VUs for 40s over 3 stages (gracefulRampDown: 30s, gracefulStop: 30s)
+
+INFO[0041] 
+=== HIGH STRESS TEST RESULTS ===
+Peak VUs: 12500
+Total Requests: 2612664
+Failed Requests: 0.00%
+Requests/sec: 65104.5 req/s
+Avg Response Time: 95.52ms
+95th Percentile: 322.43ms
+
+Status: ✅ PASSED (error rate 0.00%)
+Performance: ✅ GOOD (95% < 1000ms)  source=console
+
+running (0m40.1s), 00000/12500 VUs, 653166 complete and 0 interrupted iterations
+high_stress ✓ [======================================] 00000/12500 VUs  40s

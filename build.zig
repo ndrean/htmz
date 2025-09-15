@@ -100,6 +100,26 @@ pub fn build(b: *std.Build) void {
     // by passing `--prefix` or `-p`.
     b.installArtifact(exe);
 
+    // Add JWT executable
+    const jwt_exe = b.addExecutable(.{
+        .name = "htmz-jwt",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("src/main_jwt.zig"),
+            .target = target,
+            .optimize = optimize,
+            .imports = &.{
+                .{ .name = "htmz", .module = mod },
+            },
+        }),
+    });
+
+    jwt_exe.root_module.addImport("sqlite", sqlite.module("sqlite"));
+    jwt_exe.root_module.addImport("httpz", httpz.module("httpz"));
+    jwt_exe.root_module.addImport("zap", zap.module("zap"));
+    jwt_exe.root_module.addImport("zexplorer", zexplorer.module("zexplorer"));
+
+    b.installArtifact(jwt_exe);
+
     // This creates a top level step. Top level steps have a name and can be
     // invoked by name when running `zig build` (e.g. `zig build run`).
     // This will evaluate the `run` step rather than the default step.
@@ -124,6 +144,16 @@ pub fn build(b: *std.Build) void {
     // command itself, like this: `zig build run -- arg1 arg2 etc`
     if (b.args) |args| {
         run_cmd.addArgs(args);
+    }
+
+    // Add JWT run step
+    const run_jwt_step = b.step("run-jwt", "Run the JWT app");
+    const run_jwt_cmd = b.addRunArtifact(jwt_exe);
+    run_jwt_step.dependOn(&run_jwt_cmd.step);
+    run_jwt_cmd.step.dependOn(b.getInstallStep());
+
+    if (b.args) |args| {
+        run_jwt_cmd.addArgs(args);
     }
 
     // Creates an executable that will run `test` blocks from the provided module.

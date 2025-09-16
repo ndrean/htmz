@@ -2,19 +2,33 @@ const std = @import("std");
 const zap = @import("zap");
 const jwt = @import("jwt.zig");
 // const index = @import("index.zig");
+const templates = @import("templates.zig");
 
 // Hardcoded templates for simple interpolation
-const grocery_item_template =
-    \\<div class="bg-white rounded-lg p-4 shadow-md flex justify-between items-center transition-transform transform hover:scale-[1.02] cursor-pointer" hx-get="/api/item-details/{d}" hx-target="#item-details-card" hx-swap="innerHTML"><div><span class="text-lg font-semibold text-gray-900">{s}</span><span class="text-sm text-gray-500 ml-2">${d:.2}</span></div><button class="px-4 py-2 bg-blue-500 text-white text-sm font-medium rounded-full hover:bg-blue-600 transition-colors" hx-post="/api/cart/add/{d}" hx-swap="none">Add to Cart</button></div>
-;
+// const grocery_item_template =
+//     \\<div class="bg-white rounded-lg p-4 shadow-md flex justify-between items-center transition-transform transform hover:scale-[1.02] cursor-pointer" hx-get="/api/item-details/{d}" hx-target="#item-details-card" hx-swap="innerHTML"><div><span class="text-lg font-semibold text-gray-900">{s}</span><span class="text-sm text-gray-500 ml-2">${d:.2}</span></div><button class="px-4 py-2 bg-blue-500 text-white text-sm font-medium rounded-full hover:bg-blue-600 transition-colors" hx-post="/api/cart/add/{d}" hx-swap="none">Add to Cart</button></div>
+// ;
 
-const cart_item_template =
-    \\<div class="flex justify-between items-center p-4 border-b"><div><span class="font-semibold">{s}</span><br><span class="text-sm text-gray-500">${d:.2}</span></div><div class="flex items-center space-x-2"><button class="px-2 py-1 bg-red-500 text-white rounded" hx-post="/api/cart/decrease-quantity/{d}" hx-target="#qty-{d}" hx-swap="innerHTML">-</button><span id="qty-{d}" class="px-3 py-1 bg-gray-100 rounded">{d}</span><button class="px-2 py-1 bg-green-500 text-white rounded" hx-post="/api/cart/increase-quantity/{d}" hx-target="#qty-{d}" hx-swap="innerHTML">+</button><button class="px-2 py-1 bg-red-600 text-white rounded ml-2" hx-delete="/api/cart/remove/{d}" hx-target="#cart-content" hx-swap="innerHTML">Remove</button></div></div>
-;
+// const cart_item_template =
+//     \\<div class="flex justify-between items-center p-4 border-b"><div><span class="font-semibold">{s}</span><br><span class="text-sm text-gray-500">${d:.2}</span></div><div class="flex items-center space-x-2"><button class="px-2 py-1 bg-red-500 text-white rounded" hx-post="/api/cart/decrease-quantity/{d}" hx-target="#qty-{d}" hx-swap="innerHTML">-</button><span id="qty-{d}" class="px-3 py-1 bg-gray-100 rounded">{d}</span><button class="px-2 py-1 bg-green-500 text-white rounded" hx-post="/api/cart/increase-quantity/{d}" hx-target="#qty-{d}" hx-swap="innerHTML">+</button><button class="px-2 py-1 bg-red-600 text-white rounded ml-2" hx-delete="/api/cart/remove/{d}" hx-target="#cart-content" hx-swap="innerHTML">Remove</button></div></div>
+// ;
 
-const item_details_template =
-    \\<div class="text-center"><h3 class="text-2xl font-bold text-gray-800 mb-4">{s}</h3><div class="w-24 h-24 bg-gray-200 rounded-full mx-auto mb-4 flex items-center justify-center"><svg class="w-12 h-12 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 11V7a4 4 0 00-8 0v4M5 9h14l1 12H4L5 9z"></path></svg></div><div class="bg-blue-50 rounded-lg p-6 mb-6"><p class="text-3xl font-bold text-blue-600">${d:.2}</p><p class="text-gray-600 mt-2">per unit</p></div><button class="w-full bg-blue-600 text-white py-3 px-6 rounded-lg hover:bg-blue-700 transition-colors font-semibold" hx-post="/api/cart/add/{d}" hx-swap="none">Add to Cart</button></div>
-;
+// const item_details_template =
+//     \\<div class="text-center"><h3 class="text-2xl font-bold text-gray-800 mb-4">{s}</h3><div class="w-24 h-24 bg-gray-200 rounded-full mx-auto mb-4 flex items-center justify-center"><svg class="w-12 h-12 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 11V7a4 4 0 00-8 0v4M5 9h14l1 12H4L5 9z"></path></svg></div><div class="bg-blue-50 rounded-lg p-6 mb-6"><p class="text-3xl font-bold text-blue-600">${d:.2}</p><p class="text-gray-600 mt-2">per unit</p></div><button class="w-full bg-blue-600 text-white py-3 px-6 rounded-lg hover:bg-blue-700 transition-colors font-semibold" hx-post="/api/cart/add/{d}" hx-swap="none">Add to Cart</button></div>
+// ;
+
+// // HTML response constants
+// const groceries_page_html =
+//     \\<div class="flex flex-col md:flex-row gap-8 p-4"><div class="md:w-1/2"><h2 class="text-3xl font-bold text-gray-800 mb-6">Grocery Items</h2><div class="space-y-4 max-h-[400px] overflow-y-auto pr-2" hx-get="/api/items" hx-trigger="load, every 60s" hx-target="this" hx-swap="innerHTML"><p class="text-gray-500">Loading items...</p></div></div><div id="item-details-card" class="md:w-1/2 bg-gray-100 rounded-xl p-6 shadow-lg min-h-[300px] flex items-center justify-center transition-all duration-300" hx-get="/item-details/default" hx-trigger="load" hx-target="this" hx-swap="innerHTML"></div></div>
+// ;
+
+// const shopping_list_page_html =
+//     \\<div class="flex flex-col items-center"><h2 class="text-3xl font-bold text-gray-800 mb-6">Shopping List</h2><div id="cart-content" class="w-full max-w-xl bg-white rounded-lg p-6 shadow-md max-h-[500px] overflow-y-auto" hx-get="/api/cart" hx-trigger="load, every 30s" hx-target="this" hx-swap="innerHTML"><p class="text-gray-600 text-center">Your cart is empty.</p></div></div>
+// ;
+
+// const item_details_default_html =
+//     \\<div class="text-center text-gray-500"><h3 class="text-xl font-semibold mb-4">Select an item</h3><p class="text-gray-400">Click on a grocery item to view its details here.</p></div>
+// ;
 
 // Simple grocery items data
 const items = [_]struct { name: []const u8, price: f32 }{
@@ -34,9 +48,7 @@ var global_allocator: std.mem.Allocator = undefined;
 // Cart action enum
 const CartAction = enum { add, increase, decrease, remove };
 
-// Embedded HTML page and CSS
-const initial_html = @embedFile("html/index.html");
-const index_css = @embedFile("html/index.css");
+// Note: Using sendFile for HTML and CSS to leverage automatic compression
 
 // JWT Helper Functions
 fn getBearerToken(r: zap.Request) ?[]const u8 {
@@ -161,21 +173,22 @@ fn onRequest(r: zap.Request) !void {
             r.setStatus(.ok);
             r.setHeader("Content-Type", "text/css") catch return;
             r.setHeader("Cache-Control", "public, max-age=3600") catch return;
-            r.sendBody(index_css) catch return;
+            // Use sendFile for automatic compression via facil.io
+            r.sendFile("src/html/index.css") catch return;
             return;
         }
     } else if (std.mem.eql(u8, path, "/groceries")) {
         if (method == .GET) {
             r.setStatus(.ok);
             r.setContentType(.HTML) catch return;
-            r.sendBody("<div class=\"flex flex-col md:flex-row gap-8 p-4\"><div class=\"md:w-1/2\"><h2 class=\"text-3xl font-bold text-gray-800 mb-6\">Grocery Items</h2><div class=\"space-y-4 max-h-[400px] overflow-y-auto pr-2\" hx-get=\"/api/items\" hx-trigger=\"load, every 60s\" hx-target=\"this\" hx-swap=\"innerHTML\"><p class=\"text-gray-500\">Loading items...</p></div></div><div id=\"item-details-card\" class=\"md:w-1/2 bg-gray-100 rounded-xl p-6 shadow-lg min-h-[300px] flex items-center justify-center transition-all duration-300\" hx-get=\"/item-details/default\" hx-trigger=\"load\" hx-target=\"this\" hx-swap=\"innerHTML\"></div></div>") catch return;
+            r.sendBody(templates.groceries_page_html) catch return;
             return;
         }
     } else if (std.mem.eql(u8, path, "/shopping-list")) {
         if (method == .GET) {
             r.setStatus(.ok);
             r.setContentType(.HTML) catch return;
-            r.sendBody("<div class=\"flex flex-col items-center\"><h2 class=\"text-3xl font-bold text-gray-800 mb-6\">Shopping List</h2><div id=\"cart-content\" class=\"w-full max-w-xl bg-white rounded-lg p-6 shadow-md max-h-[500px] overflow-y-auto\" hx-get=\"/api/cart\" hx-trigger=\"load, every 30s\" hx-target=\"this\" hx-swap=\"innerHTML\"><p class=\"text-gray-600 text-center\">Your cart is empty.</p></div></div>") catch return;
+            r.sendBody(templates.shopping_list_page_html) catch return;
             return;
         }
     } else if (std.mem.eql(u8, path, "/api/items")) {
@@ -183,20 +196,24 @@ fn onRequest(r: zap.Request) !void {
             r.setStatus(.ok);
             r.setContentType(.HTML) catch return;
 
-            // Use stack buffer - each item ~400 bytes, 8 items = ~3.2KB total
-            var items_buffer: [4096]u8 = undefined;
-            var items_fbs = std.io.fixedBufferStream(&items_buffer);
-            var writer = items_fbs.writer();
+            // Use allocator for template rendering
+            var items_html: std.ArrayList(u8) = .empty;
+            defer items_html.deinit(global_allocator);
 
             for (items, 0..) |item, i| {
                 const item_id = @as(u32, @intCast(i));
-                writer.print(grocery_item_template, .{ item_id, item.name, item.price, item_id }) catch {
+                const item_html = std.fmt.allocPrint(global_allocator, templates.grocery_item_template, .{ item_id, item.name, item.price, item_id }) catch {
+                    r.setStatus(.internal_server_error);
+                    return;
+                };
+                defer global_allocator.free(item_html);
+                items_html.appendSlice(global_allocator, item_html) catch {
                     r.setStatus(.internal_server_error);
                     return;
                 };
             }
 
-            r.sendBody(items_fbs.getWritten()) catch return;
+            r.sendBody(items_html.items) catch return;
             return;
         }
     } else if (std.mem.eql(u8, path, "/api/cart")) {
@@ -233,7 +250,7 @@ fn onRequest(r: zap.Request) !void {
         if (method == .GET) {
             r.setStatus(.ok);
             r.setContentType(.HTML) catch return;
-            r.sendBody("<div class=\"text-center text-gray-500\"><h3 class=\"text-xl font-semibold mb-4\">Select an item</h3><p class=\"text-gray-400\">Click on a grocery item to view its details here.</p></div>") catch return;
+            r.sendBody(templates.item_details_default_html) catch return;
             return;
         }
     }
@@ -267,7 +284,8 @@ fn sendFullPage(r: zap.Request) void {
 
     r.setStatus(.ok);
     r.setContentType(.HTML) catch return;
-    r.sendBody(initial_html) catch return;
+    // Use sendFile for automatic compression via facil.io
+    r.sendFile("src/html/index.html") catch return;
 }
 
 fn handleCartOperation(r: zap.Request, action: CartAction) void {
@@ -368,7 +386,7 @@ fn generateCartHTML(payload: jwt.JWTPayload) ![]u8 {
     defer cart_html.deinit(global_allocator);
 
     for (payload.cart) |item| {
-        const item_html = try std.fmt.allocPrint(global_allocator, cart_item_template, .{ item.name, item.price, item.id, item.id, item.id, item.quantity, item.id, item.id, item.id });
+        const item_html = try std.fmt.allocPrint(global_allocator, templates.cart_item_template, .{ item.name, item.price, item.id, item.id, item.id, item.quantity, item.id, item.id, item.id });
         defer global_allocator.free(item_html);
         try cart_html.appendSlice(global_allocator, item_html);
     }
@@ -418,7 +436,7 @@ fn handleItemDetails(r: zap.Request) void {
 
     // Use stack buffer - item details template ~800 bytes max
     var details_buffer: [1024]u8 = undefined;
-    const item_html = std.fmt.bufPrint(&details_buffer, item_details_template, .{ item.name, item.price, item_id }) catch {
+    const item_html = std.fmt.bufPrint(&details_buffer, templates.item_details_template, .{ item.name, item.price, item_id }) catch {
         r.setStatus(.internal_server_error);
         return;
     };
@@ -442,8 +460,8 @@ pub fn main() !void {
     }
 
     {
-        // global_allocator = gpa.allocator();
-        global_allocator = std.heap.c_allocator; // Use C allocator for simplicity in this example
+        global_allocator = gpa.allocator();
+        // global_allocator = std.heap.c_allocator; // Use C allocator for simplicity in this example
 
         // Initialize Zap HTTP listener
         var listener = zap.HttpListener.init(.{
@@ -453,7 +471,7 @@ pub fn main() !void {
         });
         try listener.listen();
 
-        std.log.info("Clean JWT Server started on http://127.0.0.1:8080 with optimized config", .{});
+        std.log.info("Clean JWT Server started on http://127.0.0.1:8080 with Context pattern", .{});
         zap.start(.{ .threads = 2, .workers = 2 });
     }
     std.debug.print("Leak detected: {}\n", .{gpa.detectLeaks()});

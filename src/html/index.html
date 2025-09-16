@@ -45,7 +45,15 @@
           hx-target="#content"
           hx-push-url="true"
           hx-trigger="click"
-          >Shopping List</a
+          >Shopping List
+          <span
+            id="cart-badge"
+            class="ml-2 bg-red-500 text-white text-xs font-bold px-2 py-1 rounded-full"
+            hx-get="/cart-count"
+            hx-trigger="every 10s, load"
+          >
+            0
+          </span></a
         >
       </nav>
       <!-- Main content area will be loaded here -->

@@ -1,7 +1,13 @@
-//! JWT utilities for stateless authentication
+//! Binary token utilities for stateless authentication
 const std = @import("std");
 
-const JWT_SECRET = "your-super-secret-key-12345";
+const TOKEN_SECRET = "your-super-secret-key-12345";
+
+// Compact binary cart item (2 bytes total)
+const CartItemBinary = packed struct {
+    id: u8,        // item ID (0-7 for our 8 items)
+    quantity: u8,  // quantity (1-255)
+};
 
 pub const CartItem = struct {
     id: u32,
@@ -15,6 +21,103 @@ pub const JWTPayload = struct {
     cart: []CartItem,
     exp: i64,
 };
+
+// Binary token structure
+const BinaryTokenHeader = packed struct {
+    user_id_len: u32,
+    cart_count: u8,
+    exp: u64,  // timestamp
+};
+
+fn serializeBinaryToken(allocator: std.mem.Allocator, payload: JWTPayload) ![]u8 {
+    const header = BinaryTokenHeader{
+        .user_id_len = @intCast(payload.user_id.len),
+        .cart_count = @intCast(payload.cart.len),
+        .exp = @intCast(payload.exp),
+    };
+
+    // Calculate total size
+    const total_size = @sizeOf(BinaryTokenHeader) + payload.user_id.len + (payload.cart.len * @sizeOf(CartItemBinary));
+
+    var token_data = try allocator.alloc(u8, total_size);
+    var offset: usize = 0;
+
+    // Write header
+    @memcpy(token_data[offset..offset + @sizeOf(BinaryTokenHeader)], std.mem.asBytes(&header));
+    offset += @sizeOf(BinaryTokenHeader);
+
+    // Write user_id
+    @memcpy(token_data[offset..offset + payload.user_id.len], payload.user_id);
+    offset += payload.user_id.len;
+
+    // Write cart items
+    for (payload.cart) |item| {
+        const binary_item = CartItemBinary{
+            .id = @intCast(item.id),
+            .quantity = @intCast(item.quantity),
+        };
+        @memcpy(token_data[offset..offset + @sizeOf(CartItemBinary)], std.mem.asBytes(&binary_item));
+        offset += @sizeOf(CartItemBinary);
+    }
+
+    return token_data;
+}
+
+fn deserializeBinaryToken(allocator: std.mem.Allocator, token_data: []const u8) !JWTPayload {
+    if (token_data.len < @sizeOf(BinaryTokenHeader)) return error.InvalidToken;
+
+    var offset: usize = 0;
+
+    // Read header
+    const header = std.mem.bytesToValue(BinaryTokenHeader, token_data[offset..offset + @sizeOf(BinaryTokenHeader)]);
+    offset += @sizeOf(BinaryTokenHeader);
+
+    // Check if we have enough data
+    const expected_size = @sizeOf(BinaryTokenHeader) + header.user_id_len + (header.cart_count * @sizeOf(CartItemBinary));
+    if (token_data.len != expected_size) return error.InvalidToken;
+
+    // Read user_id
+    const user_id = try allocator.dupe(u8, token_data[offset..offset + header.user_id_len]);
+    offset += header.user_id_len;
+
+    // Read cart items
+    var cart = try allocator.alloc(CartItem, header.cart_count);
+    for (0..header.cart_count) |i| {
+        const binary_item = std.mem.bytesToValue(CartItemBinary, token_data[offset..offset + @sizeOf(CartItemBinary)]);
+        offset += @sizeOf(CartItemBinary);
+
+        // Convert to full CartItem (we'll need item names from a lookup table)
+        cart[i] = CartItem{
+            .id = binary_item.id,
+            .name = getItemName(binary_item.id), // Will implement this
+            .quantity = binary_item.quantity,
+            .price = getItemPrice(binary_item.id), // Will implement this
+        };
+    }
+
+    return JWTPayload{
+        .user_id = user_id,
+        .cart = cart,
+        .exp = @intCast(header.exp),
+    };
+}
+
+// Helper functions to get item data by ID
+fn getItemName(id: u8) []const u8 {
+    const items = [_][]const u8{
+        "Apples", "Bananas", "Bread", "Milk", "Eggs", "Cheese", "Chicken", "Rice"
+    };
+    if (id < items.len) return items[id];
+    return "Unknown";
+}
+
+fn getItemPrice(id: u8) f32 {
+    const prices = [_]f32{
+        2.99, 1.99, 3.49, 4.99, 3.99, 5.49, 8.99, 2.49
+    };
+    if (id < prices.len) return prices[id];
+    return 0.0;
+}
 
 pub fn base64UrlEncode(allocator: std.mem.Allocator, data: []const u8) ![]u8 {
     const encoder = std.base64.url_safe_no_pad.Encoder;
@@ -33,108 +136,61 @@ pub fn base64UrlDecode(allocator: std.mem.Allocator, data: []const u8) ![]u8 {
 }
 
 pub fn generateJWT(allocator: std.mem.Allocator, payload: JWTPayload) ![]u8 {
-    // Generate actual JWT with real payload data
-    const header_json = "{\"alg\":\"HS256\",\"typ\":\"JWT\"}";
+    // Serialize to binary format
+    const binary_data = try serializeBinaryToken(allocator, payload);
+    defer allocator.free(binary_data);
 
-    // Build cart JSON array
-    var cart_json: std.ArrayList(u8) = .empty;
-    defer cart_json.deinit(allocator);
-
-    try cart_json.appendSlice(allocator, "[");
-    for (payload.cart, 0..) |item, i| {
-        if (i > 0) try cart_json.appendSlice(allocator, ",");
-        const item_json = try std.fmt.allocPrint(allocator,
-            "{{\"id\":{d},\"name\":\"{s}\",\"quantity\":{d},\"price\":{d:.2}}}",
-            .{ item.id, item.name, item.quantity, item.price });
-        defer allocator.free(item_json);
-        try cart_json.appendSlice(allocator, item_json);
-    }
-    try cart_json.appendSlice(allocator, "]");
-
-    const payload_json = try std.fmt.allocPrint(allocator,
-        "{{\"user_id\":\"{s}\",\"cart\":{s},\"exp\":{d}}}",
-        .{ payload.user_id, cart_json.items, payload.exp });
-    defer allocator.free(payload_json);
-
-    const header_b64 = try base64UrlEncode(allocator, header_json);
-    defer allocator.free(header_b64);
-
-    const payload_b64 = try base64UrlEncode(allocator, payload_json);
-    defer allocator.free(payload_b64);
-
-    // Data to sign
-    const data = try std.fmt.allocPrint(allocator, "{s}.{s}", .{ header_b64, payload_b64 });
-    defer allocator.free(data);
-
-    // Sign with HMAC-SHA256
+    // Sign the binary data with HMAC-SHA256
     var signature: [32]u8 = undefined;
-    std.crypto.auth.hmac.sha2.HmacSha256.create(&signature, data, JWT_SECRET);
-    const signature_b64 = try base64UrlEncode(allocator, &signature);
-    defer allocator.free(signature_b64);
+    std.crypto.auth.hmac.sha2.HmacSha256.create(&signature, binary_data, TOKEN_SECRET);
 
-    // Final JWT
-    return std.fmt.allocPrint(allocator, "{s}.{s}", .{ data, signature_b64 });
+    // Combine binary data + signature
+    const total_len = binary_data.len + signature.len;
+    var token_with_sig = try allocator.alloc(u8, total_len);
+    @memcpy(token_with_sig[0..binary_data.len], binary_data);
+    @memcpy(token_with_sig[binary_data.len..], &signature);
+
+    // Base64 encode the entire token for HTTP cookie safety
+    const final_token = try base64UrlEncode(allocator, token_with_sig);
+    allocator.free(token_with_sig);
+
+    return final_token;
 }
 
 pub fn verifyJWT(allocator: std.mem.Allocator, token: []const u8) !JWTPayload {
-    // Split token
-    var parts = std.mem.splitSequence(u8, token, ".");
-    const header_b64 = parts.next() orelse return error.InvalidToken;
-    const payload_b64 = parts.next() orelse return error.InvalidToken;
-    const signature_b64 = parts.next() orelse return error.InvalidToken;
+    // Decode from base64
+    const token_with_sig = try base64UrlDecode(allocator, token);
+    defer allocator.free(token_with_sig);
+
+    // Check minimum size (header + signature)
+    if (token_with_sig.len < @sizeOf(BinaryTokenHeader) + 32) {
+        return error.InvalidToken;
+    }
+
+    // Split data and signature
+    const data_len = token_with_sig.len - 32;
+    const binary_data = token_with_sig[0..data_len];
+    const signature = token_with_sig[data_len..data_len + 32];
 
     // Verify signature
-    const data = try std.fmt.allocPrint(allocator, "{s}.{s}", .{ header_b64, payload_b64 });
-    defer allocator.free(data);
-
     var expected_signature: [32]u8 = undefined;
-    std.crypto.auth.hmac.sha2.HmacSha256.create(&expected_signature, data, JWT_SECRET);
-    const expected_signature_b64 = try base64UrlEncode(allocator, &expected_signature);
-    defer allocator.free(expected_signature_b64);
+    std.crypto.auth.hmac.sha2.HmacSha256.create(&expected_signature, binary_data, TOKEN_SECRET);
 
-    if (!std.mem.eql(u8, signature_b64, expected_signature_b64)) {
+    if (!std.mem.eql(u8, signature, &expected_signature)) {
         return error.InvalidSignature;
     }
 
-    // Decode payload
-    const payload_json = try base64UrlDecode(allocator, payload_b64);
-    defer allocator.free(payload_json);
+    // Deserialize binary data
+    const payload = try deserializeBinaryToken(allocator, binary_data);
 
-    const parsed = try std.json.parseFromSlice(JWTPayload, allocator, payload_json, .{});
-    // Don't defer deinit here - the caller needs the memory
-    // We need to clone the strings to avoid use-after-free
-
-    // Check expiration first
+    // Check expiration
     const now = std.time.timestamp();
-    if (parsed.value.exp < now) {
-        parsed.deinit();
+    if (payload.exp < now) {
+        deinitPayload(allocator, payload);
         return error.TokenExpired;
     }
 
-    // Clone the user_id string to avoid use-after-free
-    const user_id_clone = try allocator.dupe(u8, parsed.value.user_id);
-
-    // Clone cart items
-    const cart_clone = try allocator.alloc(CartItem, parsed.value.cart.len);
-    for (parsed.value.cart, 0..) |item, i| {
-        cart_clone[i] = CartItem{
-            .id = item.id,
-            .name = try allocator.dupe(u8, item.name),
-            .quantity = item.quantity,
-            .price = item.price,
-        };
-    }
-
-    const result = JWTPayload{
-        .user_id = user_id_clone,
-        .cart = cart_clone,
-        .exp = parsed.value.exp,
-    };
-
-    // Now we can safely free the parsed data
-    parsed.deinit();
-
-    return result;
+    return payload;
 }
 
 pub fn deinitPayload(allocator: std.mem.Allocator, payload: JWTPayload) void {

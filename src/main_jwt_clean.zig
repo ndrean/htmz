@@ -1,6 +1,7 @@
 const std = @import("std");
 const zap = @import("zap");
 const jwt = @import("jwt.zig");
+// const index = @import("index.zig");
 
 // Hardcoded templates for simple interpolation
 const grocery_item_template =

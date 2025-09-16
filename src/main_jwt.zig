@@ -27,14 +27,7 @@ const item_details_template_optimized =
 
 // JWT Helper Functions
 fn getBearerToken(r: zap.Request) ?[]const u8 {
-    // First try Authorization header (for k6 tests)
-    if (r.getHeader("authorization")) |auth_header| {
-        if (std.mem.startsWith(u8, auth_header, "Bearer ")) {
-            return auth_header[7..]; // Skip "Bearer "
-        }
-    }
-
-    // Then try cookie (for browser users) - simple approach
+    // Get JWT from cookie (both k6 and browser use cookies)
     if (r.getHeader("cookie")) |cookie_header| {
         // Look for jwt_token=VALUE in cookie string
         var cookies = std.mem.splitSequence(u8, cookie_header, ";");
@@ -436,20 +429,21 @@ pub fn main() !void {
     }
     {
         const allocator = gpa.allocator();
+        // const allocator = std.heap.c_allocator; // Use C allocator for simplicity in this example
 
         // Store allocator globally for use in request handlers
         global_allocator = allocator;
 
         // Initialize Zap HTTP listener for JWT server
         var listener = zap.HttpListener.init(.{
-            .port = 8081,
+            .port = 8080,
             .on_request = on_request_jwt,
             .log = false,
         });
         try listener.listen();
 
-        std.log.info("JWT Server started on http://127.0.0.1:8081 with GPA memory tracking", .{});
-        zap.start(.{ .threads = 2, .workers = 2 });
+        std.log.info("JWT Server started on http://127.0.0.1:8080 with optimized worker config", .{});
+        zap.start(.{ .threads = 8, .workers = 8 });
     }
     std.debug.print("Leaks detected: {}\n", .{gpa.detectLeaks()});
 }

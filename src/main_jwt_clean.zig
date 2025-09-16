@@ -38,14 +38,7 @@ const initial_html = @embedFile("html/index.html");
 
 // JWT Helper Functions
 fn getBearerToken(r: zap.Request) ?[]const u8 {
-    // First try Authorization header (for k6 tests)
-    if (r.getHeader("authorization")) |auth_header| {
-        if (std.mem.startsWith(u8, auth_header, "Bearer ")) {
-            return auth_header[7..]; // Skip "Bearer "
-        }
-    }
-
-    // Then try cookie (for browser users)
+    // Get JWT from cookie (both k6 and browser use cookies)
     if (r.getHeader("cookie")) |cookie_header| {
         var cookies = std.mem.splitSequence(u8, cookie_header, ";");
         while (cookies.next()) |cookie| {
@@ -190,23 +183,20 @@ fn onRequest(r: zap.Request) !void {
             r.setStatus(.ok);
             r.setContentType(.HTML) catch return;
 
-            var items_html: std.ArrayList(u8) = .empty;
-            defer items_html.deinit(global_allocator);
+            // Use stack buffer - each item ~400 bytes, 8 items = ~3.2KB total
+            var items_buffer: [4096]u8 = undefined;
+            var items_fbs = std.io.fixedBufferStream(&items_buffer);
+            var writer = items_fbs.writer();
 
             for (items, 0..) |item, i| {
                 const item_id = @as(u32, @intCast(i));
-                const item_html = std.fmt.allocPrint(global_allocator, grocery_item_template, .{ item_id, item.name, item.price, item_id }) catch {
-                    r.setStatus(.internal_server_error);
-                    return;
-                };
-                defer global_allocator.free(item_html);
-                items_html.appendSlice(global_allocator, item_html) catch {
+                writer.print(grocery_item_template, .{ item_id, item.name, item.price, item_id }) catch {
                     r.setStatus(.internal_server_error);
                     return;
                 };
             }
 
-            r.sendBody(items_html.items) catch return;
+            r.sendBody(items_fbs.getWritten()) catch return;
             return;
         }
     } else if (std.mem.eql(u8, path, "/api/cart")) {
@@ -425,11 +415,13 @@ fn handleItemDetails(r: zap.Request) void {
     }
 
     const item = items[item_id];
-    const item_html = std.fmt.allocPrint(global_allocator, item_details_template, .{ item.name, item.price, item_id }) catch {
+
+    // Use stack buffer - item details template ~800 bytes max
+    var details_buffer: [1024]u8 = undefined;
+    const item_html = std.fmt.bufPrint(&details_buffer, item_details_template, .{ item.name, item.price, item_id }) catch {
         r.setStatus(.internal_server_error);
         return;
     };
-    defer global_allocator.free(item_html);
 
     r.setStatus(.ok);
     r.setContentType(.HTML) catch return;
@@ -461,7 +453,7 @@ pub fn main() !void {
         });
         try listener.listen();
 
-        std.log.info("Clean JWT Server started on http://127.0.0.1:8081", .{});
+        std.log.info("Clean JWT Server started on http://127.0.0.1:8080 with optimized config", .{});
         zap.start(.{ .threads = 2, .workers = 2 });
     }
     std.debug.print("Leak detected: {}\n", .{gpa.detectLeaks()});

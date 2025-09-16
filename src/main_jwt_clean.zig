@@ -70,10 +70,7 @@ fn getOrCreateJWTCart(r: zap.Request) !jwt.JWTPayload {
     }
 
     // Create new empty cart
-    const user_id = try std.fmt.allocPrint(global_allocator, "user_{d}_{d}", .{
-        std.time.timestamp(),
-        std.crypto.random.int(u32)
-    });
+    const user_id = try std.fmt.allocPrint(global_allocator, "user_{d}_{d}", .{ std.time.timestamp(), std.crypto.random.int(u32) });
 
     return jwt.JWTPayload{
         .user_id = user_id,
@@ -453,7 +450,8 @@ pub fn main() !void {
     }
 
     {
-        global_allocator = gpa.allocator();
+        // global_allocator = gpa.allocator();
+        global_allocator = std.heap.c_allocator; // Use C allocator for simplicity in this example
 
         // Initialize Zap HTTP listener
         var listener = zap.HttpListener.init(.{

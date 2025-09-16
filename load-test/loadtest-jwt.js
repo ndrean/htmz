@@ -10,18 +10,17 @@ export const options = {
       executor: "ramping-vus",
       startVUs: 0,
       stages: [
-        { duration: "10s", target: 2500 },  // Ramp to 2500 VUs (250 VUs/sec)
-        { duration: "10s", target: 5000 },  // Ramp to 5000 VUs (250 VUs/sec)
-        { duration: "10s", target: 7500 },  // Ramp to 7500 VUs (250 VUs/sec)
-        { duration: "10s", target: 10000 }, // Ramp to 10000 VUs (250 VUs/sec)
-        { duration: "20s", target: 10000 }, // Hold at 10000 VUs
-        { duration: "10s", target: 0 },     // Ramp down
+        { duration: "10s", target: 5000 }, // Ramp to 5000 VUs (+500 VUs/sec)
+        { duration: "10s", target: 10000 }, // Ramp to 10000 VUs (+500 VUs/sec)
+        { duration: "10s", target: 15000 }, // Ramp to 15000 VUs (+500 VUs/sec)
+        { duration: "20s", target: 15000 }, // Hold to 15000 VUs (250 VUs/sec)
+        { duration: "10s", target: 0 }, // Ramp down
       ],
     },
   },
   thresholds: {
     http_req_duration: ["p(95)<1000"], // 95% under 1s
-    http_req_failed: ["rate<0.2"],     // Error rate under 20%
+    http_req_failed: ["rate<0.2"], // Error rate under 20%
   },
 };
 
@@ -77,16 +76,14 @@ export default function () {
 
   // Headers with current JWT as cookie
   const headers = () => ({
-    "Cookie": `jwt_token=${currentJWT}`,
+    Cookie: `jwt_token=${currentJWT}`,
     "Content-Type": "application/json",
   });
 
   // 1. Add item to cart
-  let response = http.post(
-    `${BASE_URL}/api/cart/add/${randomItemId}`,
-    null,
-    { headers: headers() }
-  );
+  let response = http.post(`${BASE_URL}/api/cart/add/${randomItemId}`, null, {
+    headers: headers(),
+  });
 
   check(response, {
     "add to cart status 200": (r) => r.status === 200,
@@ -126,11 +123,9 @@ export default function () {
   updateJWTFromResponse(response);
 
   // 4. Remove from cart
-  response = http.del(
-    `${BASE_URL}/api/cart/remove/${randomItemId}`,
-    null,
-    { headers: headers() }
-  );
+  response = http.del(`${BASE_URL}/api/cart/remove/${randomItemId}`, null, {
+    headers: headers(),
+  });
 
   check(response, {
     "remove from cart status 200": (r) => r.status === 200,
@@ -155,19 +150,7 @@ Requests/sec: ${metrics.http_reqs.values.rate.toFixed(1)} req/s
 Avg Response Time: ${metrics.http_req_duration.values.avg.toFixed(2)}ms
 95th Percentile: ${metrics.http_req_duration.values["p(95)"].toFixed(2)}ms
 
-Status: ${
-    metrics.http_req_failed.values.rate < 0.2 ? "✅ PASSED" : "❌ FAILED"
-  } (error rate ${(metrics.http_req_failed.values.rate * 100).toFixed(2)}%)
-Performance: ${
-    metrics.http_req_duration.values["p(95)"] < 1000 ? "✅ GOOD" : "⚠️  SLOW"
-  } (95% < 1000ms)
-
-🎯 JWT BENEFITS:
-- No server-side session storage
-- Infinite horizontal scalability
-- Zero memory growth on server
-- Stateless architecture
 `);
 
-  return { stdout: "" }; // Suppress default summary
+  // return { stdout: "" }; // Suppress default summary
 }

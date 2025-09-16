@@ -170,9 +170,10 @@ fn on_request_jwt(r: zap.Request) !void {
                 if (jwt.verifyJWT(allocator, token)) |valid_payload| {
                     jwt.deinitPayload(allocator, valid_payload); // Free the payload immediately
                     user_jwt = token; // Valid JWT, use it
-                } else |_| {
-                    // Invalid/expired token, will generate new one
                 }
+                // else |_| {
+                //     // Invalid/expired token, will generate new one
+                // }
             }
 
             // Generate new JWT if user doesn't have valid one (browser case)

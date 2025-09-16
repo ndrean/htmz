@@ -10,10 +10,10 @@ export const options = {
       executor: "ramping-vus",
       startVUs: 0,
       stages: [
-        { duration: "10s", target: 5000 }, // Ramp to 5000 VUs (+500 VUs/sec)
-        { duration: "10s", target: 10000 }, // Ramp to 10000 VUs (+500 VUs/sec)
-        { duration: "10s", target: 15000 }, // Ramp to 15000 VUs (+500 VUs/sec)
-        { duration: "20s", target: 15000 }, // Hold to 15000 VUs (250 VUs/sec)
+        { duration: "10s", target: 500 }, // Ramp to 5000 VUs (+500 VUs/sec)
+        { duration: "10s", target: 1000 }, // Ramp to 10000 VUs (+500 VUs/sec)
+        { duration: "10s", target: 5000 }, // Ramp to 15000 VUs (+500 VUs/sec)
+        { duration: "20s", target: 5000 }, // Hold to 15000 VUs (250 VUs/sec)
         { duration: "10s", target: 0 }, // Ramp down
       ],
     },

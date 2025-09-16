@@ -33,8 +33,9 @@ var global_allocator: std.mem.Allocator = undefined;
 // Cart action enum
 const CartAction = enum { add, increase, decrease, remove };
 
-// Embedded HTML page
+// Embedded HTML page and CSS
 const initial_html = @embedFile("html/index.html");
+const index_css = @embedFile("html/index.css");
 
 // JWT Helper Functions
 fn getBearerToken(r: zap.Request) ?[]const u8 {
@@ -158,10 +159,8 @@ fn onRequest(r: zap.Request) !void {
         if (method == .GET) {
             r.setStatus(.ok);
             r.setHeader("Content-Type", "text/css") catch return;
-            r.sendFile("src/html/index.css") catch {
-                r.setStatus(.not_found);
-                r.sendBody("CSS file not found") catch return;
-            };
+            r.setHeader("Cache-Control", "public, max-age=3600") catch return;
+            r.sendBody(index_css) catch return;
             return;
         }
     } else if (std.mem.eql(u8, path, "/groceries")) {

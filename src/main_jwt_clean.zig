@@ -50,7 +50,6 @@ fn validateJWT(r: zap.Request) ?jwt.JWTPayload {
 // Create new JWT - ONLY used in sendFullPage for GET /
 fn createNewJWTUser() !jwt.JWTPayload {
     const user_id = try std.fmt.allocPrint(global_allocator, "user_{d}_{d}", .{ std.time.timestamp(), std.crypto.random.int(u32) });
-    // std.debug.print("DEBUG: Created NEW user_id: {s}\n", .{user_id});
 
     return jwt.JWTPayload{
         .user_id = user_id,
@@ -61,7 +60,6 @@ fn createNewJWTUser() !jwt.JWTPayload {
 // Get or create JWT - ONLY used in sendFullPage
 fn getOrCreateJWTForHomePage(r: zap.Request) !jwt.JWTPayload {
     if (validateJWT(r)) |payload| {
-        // std.debug.print("DEBUG: Using existing user_id: {s}\n", .{payload.user_id});
         return payload;
     } else {
         return createNewJWTUser();
@@ -77,7 +75,6 @@ fn onRequest(r: zap.Request) !void {
     };
 
     const method = r.methodAsEnum();
-    // std.debug.print("REQUEST: {s} {s}\n", .{ @tagName(method), path });
 
     // JWT-based routing
     if (std.mem.eql(u8, path, "/")) {
@@ -138,22 +135,6 @@ fn onRequest(r: zap.Request) !void {
             handleCartOperation(r, .remove);
             return;
         }
-    // JSON ENDPOINTS for client-side templates (check JSON endpoints FIRST)
-    } else if (std.mem.eql(u8, path, "/api/items/json")) {
-        if (method == .GET) {
-            handleItemsListJSON(r);
-            return;
-        }
-    } else if (std.mem.eql(u8, path, "/api/cart/json")) {
-        if (method == .GET) {
-            handleCartDisplayJSON(r);
-            return;
-        }
-    } else if (std.mem.startsWith(u8, path, "/api/item-details/") and std.mem.endsWith(u8, path, "/json")) {
-        if (method == .GET) {
-            handleItemDetailsJSON(r);
-            return;
-        }
     } else if (std.mem.startsWith(u8, path, "/api/item-details/")) {
         if (method == .GET) {
             handleItemDetails(r);
@@ -197,8 +178,6 @@ fn sendFullPage(r: zap.Request) void {
     };
     defer global_allocator.free(token);
 
-    // std.debug.print("Generated JWT: {s}\n", .{token});
-
     // Set JWT in cookie only (headers are useless for HTMX)
     r.setCookie(.{
         .http_only = true,
@@ -240,18 +219,6 @@ fn handleCartOperation(r: zap.Request, action: CartAction) void {
         return;
     };
 
-    // Get grocery item from database
-    const main_db = global_cart_manager.getMainDatabase();
-    const grocery_item_opt = main_db.getGroceryItem(global_allocator, item_id) catch {
-        r.setStatus(.internal_server_error);
-        return;
-    };
-
-    const grocery_item = grocery_item_opt orelse {
-        r.setStatus(.not_found);
-        return;
-    };
-    defer global_allocator.free(grocery_item.name);
 
     // Validate JWT - redirect to / if missing/invalid
     const payload = validateJWT(r) orelse {
@@ -261,29 +228,22 @@ fn handleCartOperation(r: zap.Request, action: CartAction) void {
     };
     defer jwt.deinitPayload(global_allocator, payload);
 
-    // JWT is already validated, no need to set cookie again
-
-    // Perform database operation
-    // std.debug.print("CART OP: {s} action for item_id {d} ({s})\n", .{ @tagName(action), item_id, grocery_item.name });
 
     switch (action) {
         .add => {
             global_cart_manager.addToCart(payload.user_id, item_id) catch {
-                // std.debug.print("CART OP ERROR: {}\n", .{err});
                 r.setStatus(.internal_server_error);
                 return;
             };
         },
         .increase => {
             global_cart_manager.increaseQuantity(payload.user_id, item_id) catch {
-                // std.debug.print("CART OP ERROR: {}\n", .{err});
                 r.setStatus(.internal_server_error);
                 return;
             };
         },
         .decrease => {
             global_cart_manager.decreaseQuantity(payload.user_id, item_id) catch {
-                // std.debug.print("CART OP ERROR: {}\n", .{err});
                 r.setStatus(.internal_server_error);
                 return;
             };
@@ -291,14 +251,12 @@ fn handleCartOperation(r: zap.Request, action: CartAction) void {
         .remove => {
             global_cart_manager.removeFromCart(payload.user_id, item_id) catch {
 
-                // std.debug.print("CART OP ERROR: {}\n", .{err});
                 r.setStatus(.internal_server_error);
                 return;
             };
         },
     }
 
-    // std.debug.print("CART OP: Success\n", .{});
 
     r.setStatus(.ok);
 
@@ -525,181 +483,6 @@ fn handleCartTotal(r: zap.Request) void {
     r.setStatus(.ok);
     r.setContentType(.HTML) catch return;
     r.sendBody(total_str) catch return;
-}
-
-// JSON ENDPOINT HANDLERS for client-side templates
-
-fn handleItemsListJSON(r: zap.Request) void {
-    const main_db = global_cart_manager.getMainDatabase();
-    const items = main_db.getAllGroceryItems(global_allocator) catch {
-        r.setStatus(.internal_server_error);
-        return;
-    };
-    defer {
-        for (items) |item| {
-            global_allocator.free(item.name);
-        }
-        global_allocator.free(items);
-    }
-
-    r.setStatus(.ok);
-    r.setContentType(.JSON) catch return;
-
-    // Build JSON array manually for performance
-    var json_buffer: std.ArrayList(u8) = .empty;
-    defer json_buffer.deinit(global_allocator);
-
-    json_buffer.appendSlice(global_allocator, "[") catch {
-        r.setStatus(.internal_server_error);
-        return;
-    };
-
-    for (items, 0..) |item, i| {
-        if (i > 0) {
-            json_buffer.appendSlice(global_allocator, ",") catch {
-                r.setStatus(.internal_server_error);
-                return;
-            };
-        }
-
-        const item_json = std.fmt.allocPrint(global_allocator,
-            "{{\"id\":{d},\"name\":\"{s}\",\"price\":{d:.2}}}",
-            .{ item.id, item.name, item.price }) catch {
-            r.setStatus(.internal_server_error);
-            return;
-        };
-        defer global_allocator.free(item_json);
-
-        json_buffer.appendSlice(global_allocator, item_json) catch {
-            r.setStatus(.internal_server_error);
-            return;
-        };
-    }
-
-    json_buffer.appendSlice(global_allocator, "]") catch {
-        r.setStatus(.internal_server_error);
-        return;
-    };
-
-    r.sendBody(json_buffer.items) catch return;
-}
-
-fn handleCartDisplayJSON(r: zap.Request) void {
-    const payload = validateJWT(r) orelse {
-        r.setStatus(.unauthorized);
-        r.setContentType(.JSON) catch return;
-        r.sendBody("{\"error\":\"unauthorized\"}") catch return;
-        return;
-    };
-    defer jwt.deinitPayload(global_allocator, payload);
-
-    const cart_items = global_cart_manager.getCart(global_allocator, payload.user_id) catch {
-        r.setStatus(.internal_server_error);
-        return;
-    };
-    defer {
-        for (cart_items) |item| {
-            global_allocator.free(item.name);
-        }
-        global_allocator.free(cart_items);
-    }
-
-    r.setStatus(.ok);
-    r.setContentType(.JSON) catch return;
-
-    // Build JSON with items array and total
-    var json_buffer: std.ArrayList(u8) = .empty;
-    defer json_buffer.deinit(global_allocator);
-
-    json_buffer.appendSlice(global_allocator, "{\"items\":[") catch {
-        r.setStatus(.internal_server_error);
-        return;
-    };
-
-    var total: f32 = 0.0;
-    for (cart_items, 0..) |item, i| {
-        if (i > 0) {
-            json_buffer.appendSlice(global_allocator, ",") catch {
-                r.setStatus(.internal_server_error);
-                return;
-            };
-        }
-
-        const item_json = std.fmt.allocPrint(global_allocator,
-            "{{\"id\":{d},\"name\":\"{s}\",\"price\":{d:.2},\"quantity\":{d}}}",
-            .{ item.id, item.name, item.price, item.quantity }) catch {
-            r.setStatus(.internal_server_error);
-            return;
-        };
-        defer global_allocator.free(item_json);
-
-        json_buffer.appendSlice(global_allocator, item_json) catch {
-            r.setStatus(.internal_server_error);
-            return;
-        };
-
-        total += item.price * @as(f32, @floatFromInt(item.quantity));
-    }
-
-    const total_json = std.fmt.allocPrint(global_allocator, "],\"total\":{d:.2}}}", .{total}) catch {
-        r.setStatus(.internal_server_error);
-        return;
-    };
-    defer global_allocator.free(total_json);
-
-    json_buffer.appendSlice(global_allocator, total_json) catch {
-        r.setStatus(.internal_server_error);
-        return;
-    };
-
-    r.sendBody(json_buffer.items) catch return;
-}
-
-fn handleItemDetailsJSON(r: zap.Request) void {
-    const path = r.path orelse {
-        r.setStatus(.bad_request);
-        return;
-    };
-
-    // Extract item_id from "/api/item-details/{id}/json"
-    const prefix = "/api/item-details/";
-    const suffix = "/json";
-    if (path.len < prefix.len + suffix.len + 1) { // Need at least 1 char for ID
-        r.setStatus(.bad_request);
-        return;
-    }
-
-    const item_id_str = path[prefix.len .. path.len - suffix.len];
-    const item_id = std.fmt.parseInt(u32, item_id_str, 10) catch {
-        r.setStatus(.bad_request);
-        return;
-    };
-
-    // Get grocery item from database
-    const main_db = global_cart_manager.getMainDatabase();
-    const grocery_item_opt = main_db.getGroceryItem(global_allocator, item_id) catch {
-        r.setStatus(.internal_server_error);
-        return;
-    };
-
-    const grocery_item = grocery_item_opt orelse {
-        r.setStatus(.not_found);
-        return;
-    };
-    defer global_allocator.free(grocery_item.name);
-
-    // Build JSON response
-    const item_json = std.fmt.allocPrint(global_allocator,
-        "{{\"id\":{d},\"name\":\"{s}\",\"price\":{d:.2}}}",
-        .{ grocery_item.id, grocery_item.name, grocery_item.price }) catch {
-        r.setStatus(.internal_server_error);
-        return;
-    };
-    defer global_allocator.free(item_json);
-
-    r.setStatus(.ok);
-    r.setContentType(.JSON) catch return;
-    r.sendBody(item_json) catch return;
 }
 
 pub fn main() !void {

@@ -42,9 +42,8 @@ sequenceDiagram
 
 ## Stress test
 
-1) First old test
-
-k6 run load-test/loadtest.js
+```txt
+k6 run load-test/progressive-test.js
 
          /\      Grafana   /‾‾/  
     /\  /  \     |\  __   /  /   
@@ -53,67 +52,71 @@ k6 run load-test/loadtest.js
  / __________ \  |_|\_\  \_____/ 
 
      execution: local
-        script: load-test/loadtest.js
+        script: load-test/progressive-test.js
         output: -
 
-     scenarios: (100.00%) 1 scenario, 6000 max VUs, 1m0s max duration (incl. graceful stop):
-              * default: 6000 looping VUs for 30s (gracefulStop: 30s)
+     scenarios: (100.00%) 1 scenario, 10000 max VUs, 2m0s max duration (incl. graceful stop):
+              * progressive_load: Up to 10000 looping VUs for 1m30s over 5 stages (gracefulRampDown: 30s, gracefulStop: 30s)
 
+INFO[0091] 
+=== PROGRESSIVE LOAD TEST: PLATEAU PERFORMANCE ===
+📊 PLATEAU 1 (5K VUs - 30s):
+  Requests: 2201997
+  Req/s: 73400
+  Avg Response Time: 26.88ms
+  95th Percentile: 139.57ms
+
+📊 PLATEAU 2 (10K VUs - 30s):
+  Requests: 0
+  Req/s: 0
+  Avg Response Time: N/Ams
+  95th Percentile: N/Ams
+
+=== OVERALL RESULTS ===
+Peak VUs: 10000
+Total Requests: 4413994
+Failed Requests: 0.00%
+Overall Requests/sec: 48938.3 req/s
+Avg Response Time: 27.77ms
+95th Percentile: 147.53ms  source=console
+
+
+  █ THRESHOLDS 
+
+    http_req_duration
+    ✓ 'p(95)<5000' p(95)=147.52ms
 
 
   █ TOTAL RESULTS 
 
+    checks_total.......: 4403994 48827.422919/s
+    checks_succeeded...: 100.00% 4403994 out of 4403994
+    checks_failed......: 0.00%   0 out of 4403994
+
+    ✓ add to cart status 200
+    ✓ remove from cart status 200
+
     HTTP
-    http_req_duration..............: avg=77.28ms min=36µs     med=45.32ms max=526.75ms p(90)=205.27ms p(95)=259.4ms 
-      { expected_response:true }...: avg=77.34ms min=36µs     med=45.32ms max=526.75ms p(90)=205.46ms p(95)=259.62ms
-    http_req_failed................: 2.29%  19924 out of 868516
-    http_reqs......................: 868516 26364.588987/s
+    http_req_duration..............: avg=27.76ms   min=28µs     med=9.29ms   max=2.49s   p(90)=51.84ms  p(95)=147.52ms
+      { expected_response:true }...: avg=27.76ms   min=28µs     med=9.29ms   max=2.49s   p(90)=51.84ms  p(95)=147.52ms
+    http_req_duration_5k...........: avg=26.883481 min=0.028    med=8.76     max=525.557 p(90)=51.199   p(95)=139.57  
+    http_req_failed................: 0.00%   0 out of 4413994
+    http_reqs......................: 4413994 48938.293695/s
+    http_reqs_5k...................: 2201997 24413.71146/s
 
     EXECUTION
-    iteration_duration.............: avg=2.36s   min=515.18ms med=2.36s   max=4.74s    p(90)=3.24s    p(95)=3.45s   
-    iterations.....................: 78956  2396.780817/s
-    vus............................: 68     min=68              max=6000
-    vus_max........................: 6000   min=6000            max=6000
+    iteration_duration.............: avg=270.65ms  min=200.13ms med=245.92ms max=4.67s   p(90)=430.86ms p(95)=491.41ms
+    iterations.....................: 2201997 24413.71146/s
+    vus............................: 509     min=287          max=10000
+    vus_max........................: 10000   min=10000        max=10000
 
     NETWORK
-    data_received..................: 1.9 GB 58 MB/s
-    data_sent......................: 79 MB  2.4 MB/s
+    data_received..................: 985 MB  11 MB/s
+    data_sent......................: 1.1 GB  12 MB/s
 
 
 
 
-running (0m32.9s), 0000/6000 VUs, 78956 complete and 0 interrupted iterations
-
-default ✓ [======================================] 6000 VUs  30s
-
-k6 run load-test/loadtest.js`
-
-1) 
-
-         /\      Grafana   /‾‾/  
-    /\  /  \     |\  __   /  /   
-   /  \/    \    | |/ /  /   ‾‾\ 
-  /          \   |   (  |  (‾)  |
- / __________ \  |_|\_\  \_____/ 
-
-     execution: local
-        script: load-test/loadtest.js
-        output: -
-
-     scenarios: (100.00%) 1 scenario, 12500 max VUs, 1m10s max duration (incl. graceful stop):
-              * high_stress: Up to 12500 looping VUs for 40s over 3 stages (gracefulRampDown: 30s, gracefulStop: 30s)
-
-INFO[0041] 
-=== HIGH STRESS TEST RESULTS ===
-Peak VUs: 12500
-Total Requests: 2612664
-Failed Requests: 0.00%
-Requests/sec: 65104.5 req/s
-Avg Response Time: 95.52ms
-95th Percentile: 322.43ms
-
-Status: ✅ PASSED (error rate 0.00%)
-Performance: ✅ GOOD (95% < 1000ms)  source=console
-
-running (0m40.1s), 00000/12500 VUs, 653166 complete and 0 interrupted iterations
-high_stress ✓ [======================================] 00000/12500 VUs  40s
+running (1m30.2s), 00000/10000 VUs, 2201997 complete and 0 interrupted iterations
+progressive_load ✓ [======================================] 00000/10000 VUs  1m30s
+```

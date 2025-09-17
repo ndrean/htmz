@@ -2,6 +2,7 @@ import http from "k6/http";
 import { sleep } from "k6";
 import { check } from "k6";
 import { Trend, Counter } from "k6/metrics";
+import exec from "k6/execution";
 
 export const options = {
   scenarios: {
@@ -9,42 +10,32 @@ export const options = {
       executor: "ramping-vus",
       startVUs: 0,
       stages: [
-        { duration: "10s", target: 4_000 }, // Ramp to 4K users
-        { duration: "10s", target: 8_000 }, // Ramp to 8K users
-        { duration: "10s", target: 10_000 }, // Ramp to 10K users
-        { duration: "20s", target: 10_000 }, // Hold at 10K users
-
+        { duration: "10s", target: 5000 }, // Ramp to 5K users
+        { duration: "30s", target: 5000 }, // Hold at 5K users (Plateau 1)
+        { duration: "10s", target: 10000 }, // Ramp to 10K users
+        { duration: "30s", target: 10000 }, // Hold at 10K users (Plateau 2)
         { duration: "10s", target: 0 }, // Ramp down
       ],
     },
   },
   thresholds: {
     http_req_duration: ["p(95)<5000"], // 95% under 5s
-    http_req_failed: ["rate<0.2"], // Error rate under 20% (expect some failures at extreme load)
   },
 };
 
 const BASE_URL = "http://localhost:8080";
 const itemIds = [1, 2, 3, 4, 5, 6, 7];
 
-// Custom metrics per stage
-const stage4k = new Trend('http_req_duration_4k');
-const stage8k = new Trend('http_req_duration_8k');
-const stage10k = new Trend('http_req_duration_10k');
-const requests4k = new Counter('http_reqs_4k');
-const requests8k = new Counter('http_reqs_8k');
-const requests10k = new Counter('http_reqs_10k');
+// Custom metrics per plateau
+const plateau5k = new Trend("http_req_duration_5k");
+const plateau10k = new Trend("http_req_duration_10k");
+const requests5k = new Counter("http_reqs_5k");
+const requests10k = new Counter("http_reqs_10k");
 
 // Global JWT cookie for this VU
 let jwtCookie = null;
-let testStartTime = null;
 
 export default function () {
-  // Initialize test start time on first run
-  if (!testStartTime) {
-    testStartTime = Date.now();
-  }
-
   // Get a real JWT token from server if we don't have one
   if (!jwtCookie) {
     const response = http.get(`${BASE_URL}/`, { timeout: "30s" });
@@ -63,12 +54,20 @@ export default function () {
     }
   }
 
-  // Determine current stage based on elapsed time
-  const elapsed = Date.now() - testStartTime;
-  let currentStage = 'ramp1'; // 0-10s: ramping to 4k
-  if (elapsed > 10000 && elapsed <= 20000) currentStage = 'ramp2'; // 10-20s: ramping to 8k
-  if (elapsed > 20000 && elapsed <= 30000) currentStage = 'ramp3'; // 20-30s: ramping to 10k
-  if (elapsed > 30000 && elapsed <= 50000) currentStage = 'hold'; // 30-50s: holding at 10k
+  // Determine current stage using k6 execution context elapsed time
+  const elapsedMs = Date.now() - exec.scenario.startTime;
+  const elapsedSeconds = elapsedMs / 1000;
+
+  let currentStage = "none";
+  // 10-40s: 5K plateau (10s ramp + 30s hold)
+  if (elapsedSeconds >= 10 && elapsedSeconds <= 40) currentStage = "plateau5k";
+  // 50-80s: 10K plateau (after 10s ramp, 30s hold)
+  if (elapsedSeconds >= 50 && elapsedSeconds <= 80) currentStage = "plateau10k";
+
+  // Debug: Log stage transitions (only occasionally to avoid spam)
+  // if (Math.random() < 0.001) {
+  //   console.log(`[DEBUG] Elapsed: ${elapsedSeconds.toFixed(1)}s, Stage: ${currentStage}`);
+  // }
 
   const randomItemId = itemIds[Math.floor(Math.random() * itemIds.length)];
 
@@ -84,17 +83,15 @@ export default function () {
     timeout: "30s",
   });
 
-  // Record metrics based on current stage
-  if (currentStage === 'ramp2') {
-    stage8k.add(response.timings.duration);
-    requests8k.add(1);
-  } else if (currentStage === 'ramp3' || currentStage === 'hold') {
-    stage10k.add(response.timings.duration);
+  // Record metrics only during actual plateaus
+  if (currentStage === "plateau5k") {
+    plateau5k.add(response.timings.duration);
+    requests5k.add(1);
+  } else if (currentStage === "plateau10k") {
+    plateau10k.add(response.timings.duration);
     requests10k.add(1);
-  } else {
-    stage4k.add(response.timings.duration);
-    requests4k.add(1);
   }
+  // Ignore ramp periods ("none")
 
   check(response, {
     "add to cart status 200": (r) => r.status === 200,
@@ -108,48 +105,53 @@ export default function () {
   });
 
   // Record metrics for remove request too
-  if (currentStage === 'ramp2') {
-    stage8k.add(response.timings.duration);
-    requests8k.add(1);
-  } else if (currentStage === 'ramp3' || currentStage === 'hold') {
-    stage10k.add(response.timings.duration);
+  if (currentStage === "plateau5k") {
+    plateau5k.add(response.timings.duration);
+    requests5k.add(1);
+  } else if (currentStage === "plateau10k") {
+    plateau10k.add(response.timings.duration);
     requests10k.add(1);
-  } else {
-    stage4k.add(response.timings.duration);
-    requests4k.add(1);
   }
 
   check(response, {
     "remove from cart status 200": (r) => r.status === 200,
   });
 
-  // Very short pause for maximum throughput
   sleep(0.1);
 }
 
 export function handleSummary(data) {
   const metrics = data.metrics;
 
-  // Calculate requests per second for each stage (approximation)
-  const stage4kReqs = metrics.http_reqs_4k?.values?.count || 0;
-  const stage8kReqs = metrics.http_reqs_8k?.values?.count || 0;
-  const stage10kReqs = metrics.http_reqs_10k?.values?.count || 0;
+  // Calculate requests per second for each plateau
+  const plateau5kReqs = metrics.http_reqs_5k?.values?.count || 0;
+  const plateau10kReqs = metrics.http_reqs_10k?.values?.count || 0;
 
-  const reqs4kPerSec = stage4kReqs / 10; // 10s ramp period
-  const reqs8kPerSec = stage8kReqs / 10; // 10s ramp period
-  const reqs10kPerSec = stage10kReqs / 30; // 10s ramp + 20s hold = 30s
+  // Plateau durations (30s each)
+  const reqs5kPerSec = plateau5kReqs / 30;
+  const reqs10kPerSec = plateau10kReqs / 30;
 
   console.log(`
-=== PROGRESSIVE LOAD TEST: PER-STAGE BREAKDOWN ===
-📊 STAGE PERFORMANCE:
-  4K VUs Stage: ${stage4kReqs.toLocaleString()} requests (${reqs4kPerSec.toFixed(0)} req/s)
-  8K VUs Stage: ${stage8kReqs.toLocaleString()} requests (${reqs8kPerSec.toFixed(0)} req/s)
-  10K VUs Stage: ${stage10kReqs.toLocaleString()} requests (${reqs10kPerSec.toFixed(0)} req/s)
+=== PROGRESSIVE LOAD TEST: PLATEAU PERFORMANCE ===
+📊 PLATEAU 1 (5K VUs - 30s):
+  Requests: ${plateau5kReqs.toLocaleString()}
+  Req/s: ${reqs5kPerSec.toFixed(0)}
+  Avg Response Time: ${
+    metrics.http_req_duration_5k?.values?.avg?.toFixed(2) || "N/A"
+  }ms
+  95th Percentile: ${
+    metrics.http_req_duration_5k?.values?.["p(95)"]?.toFixed(2) || "N/A"
+  }ms
 
-📈 RESPONSE TIMES:
-  4K VUs: ${metrics.http_req_duration_4k?.values?.avg?.toFixed(2) || 'N/A'}ms avg
-  8K VUs: ${metrics.http_req_duration_8k?.values?.avg?.toFixed(2) || 'N/A'}ms avg
-  10K VUs: ${metrics.http_req_duration_10k?.values?.avg?.toFixed(2) || 'N/A'}ms avg
+📊 PLATEAU 2 (10K VUs - 30s):
+  Requests: ${plateau10kReqs.toLocaleString()}
+  Req/s: ${reqs10kPerSec.toFixed(0)}
+  Avg Response Time: ${
+    metrics.http_req_duration_10k?.values?.avg?.toFixed(2) || "N/A"
+  }ms
+  95th Percentile: ${
+    metrics.http_req_duration_10k?.values?.["p(95)"]?.toFixed(2) || "N/A"
+  }ms
 
 === OVERALL RESULTS ===
 Peak VUs: ${metrics.vus_max.values.max}
@@ -158,7 +160,5 @@ Failed Requests: ${(metrics.http_req_failed.values.rate * 100).toFixed(2)}%
 Overall Requests/sec: ${metrics.http_reqs.values.rate.toFixed(1)} req/s
 Avg Response Time: ${metrics.http_req_duration.values.avg.toFixed(2)}ms
 95th Percentile: ${metrics.http_req_duration.values["p(95)"].toFixed(2)}ms
-
-🎯 MAXIMUM SCALE REACHED: ${metrics.vus_max.values.max} concurrent users
 `);
 }

@@ -1,9 +1,11 @@
 /.zig-cache
 src/html/node_modules
 /node_modules/
-/zig-out/
+/zig-out
 .DS_Store
 .vscode
-old-files/*
+old-files/
 htmz.sql3
 /docs
+CLAUDE.md
+.claude/

@@ -1,1 +1,9 @@
 /.zig-cache
+src/html/node_modules
+/node_modules/
+/zig-out/
+.DS_Store
+.vscode
+old-files/*
+htmz.sql3
+/docs

@@ -169,9 +169,9 @@
 // };
 
 // fn get_bearer_token(r: zap.Request) []const u8 {
-//     const auth_header = zap.Auth.extractAuthHeader(.Bearer, &r) orelse "Bearer (no token)";
-//     return auth_header[zap.Auth.AuthScheme.Bearer.str().len..];
-// }
+//         const auth_header = zap.Auth.extractAuthHeader(.Bearer, &r) orelse "Bearer (no token)";
+//         return auth_header[zap.Auth.AuthScheme.Bearer.str().len..];
+//     }
 
 // pub fn runServer(
 //     allocator: std.mem.Allocator,

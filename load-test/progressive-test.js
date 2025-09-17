@@ -131,7 +131,6 @@ export function handleSummary(data) {
   const metrics = data.metrics;
 
   // Calculate requests per second for each stage (approximation)
-  const totalDuration = 60; // Total test duration in seconds
   const stage4kReqs = metrics.http_reqs_4k?.values?.count || 0;
   const stage8kReqs = metrics.http_reqs_8k?.values?.count || 0;
   const stage10kReqs = metrics.http_reqs_10k?.values?.count || 0;

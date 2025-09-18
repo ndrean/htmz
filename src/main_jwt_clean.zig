@@ -142,26 +142,8 @@ pub const HomeEndpoint = struct {
 
         r.setStatus(.ok);
         r.setContentType(.HTML) catch return;
-        // Use sendFile for automatic compression via facil.io
+        // Use sendFile: facil.io sends gz if exists
         r.sendFile("src/html/index.html") catch return;
-    }
-};
-
-/// Static Endpoint - handles CSS and static files
-pub const StaticEndpoint = struct {
-    app_context: *AppContext,
-    path: []const u8 = "/index.css",
-    error_strategy: zap.Endpoint.ErrorStrategy = .log_to_response,
-
-    pub fn init(ctx: *AppContext) StaticEndpoint {
-        return StaticEndpoint{ .app_context = ctx };
-    }
-
-    pub fn get(_: *StaticEndpoint, r: zap.Request) !void {
-        r.setStatus(.ok);
-        r.setHeader("Content-Type", "text/css") catch return;
-        r.setHeader("Cache-Control", "public, max-age=3600") catch return;
-        r.sendFile("src/html/index.css") catch return;
     }
 };
 
@@ -571,8 +553,27 @@ fn simpleHandler(r: zap.Request) !void {
     }
 
     if (std.mem.eql(u8, path, "/index.css") and method == .GET) {
-        var static_endpoint = StaticEndpoint.init(app_context);
-        try static_endpoint.get(r);
+        // var static_endpoint = CssEndpoint.init(app_context);
+        // try static_endpoint.get(r);
+        // return;
+        r.setStatus(.ok);
+        r.setHeader("Content-Type", "text/css") catch return;
+        r.setHeader("Cache-Control", "public, max-age=3600") catch return;
+        r.sendFile("src/html/index.css") catch return;
+        return;
+    }
+    if (std.mem.eql(u8, path, "/htmx.min.js") and method == .GET) {
+        r.setStatus(.ok);
+        r.setHeader("Content-Type", "application/javascript") catch return;
+        r.setHeader("Cache-Control", "public, max-age=3600") catch return;
+        r.sendFile("src/html/htmx.min.js") catch return;
+        return;
+    }
+    if (std.mem.eql(u8, path, "/ws.min.js") and method == .GET) {
+        r.setStatus(.ok);
+        r.setHeader("Content-Type", "application/javascript") catch return;
+        r.setHeader("Cache-Control", "public, max-age=3600") catch return;
+        r.sendFile("src/html/ws.min.js") catch return;
         return;
     }
 
@@ -594,6 +595,7 @@ fn simpleHandler(r: zap.Request) !void {
         return;
     }
 
+    // JWT protected routes below-------------------
     // Cart routes
     if (std.mem.startsWith(u8, path, "/api/cart")) {
         var cart_endpoint = CartEndpoint.init(app_context);
@@ -611,6 +613,7 @@ fn simpleHandler(r: zap.Request) !void {
     if ((std.mem.eql(u8, path, "/cart-count") or std.mem.eql(u8, path, "/cart-total")) and method == .GET) {
         var cart_stats_endpoint = CartStatsEndpoint.init(app_context);
         try cart_stats_endpoint.get(r);
+
         return;
     }
 
@@ -651,6 +654,7 @@ pub fn main() !void {
             .port = 8080,
             .on_request = simpleHandler,
             .log = false,
+            .public_folder = "html",
         });
 
         // Store context for handler access

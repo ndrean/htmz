@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>HTMX-Z Demo</title>
-    <script src="https://unpkg.com/htmx.org@1.9.10"></script>
+    <!--<script src="https://unpkg.com/htmx.org@1.9.10"></script>-->
     <link rel="stylesheet" href="index.css" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -16,6 +16,9 @@
   <body
     class="bg-gray-50 min-h-screen flex flex-col items-center p-6 font-inter"
   >
+    <script src="htmx.min.js"></script>
+    <script src="ws.min.js"></script>
+
     <header class="mb-8 text-center">
       <h1 class="text-5xl font-extrabold text-blue-600">My Shopping Cart</h1>
       <p class="text-md text-gray-500 mt-2">
@@ -28,7 +31,11 @@
         Authentication: <code>JWT</code>, Shopping Cart: stored in
         <code>HashMap</code>
       </p>
+      <p class="text-md text-gray-500 mt-1" hx-ext="ws" ws-connect="/presence">
+        Presence: <span id="presence-count">0</span> users online
+      </p>
     </header>
+
     <main class="w-full max-w-6xl p-8 bg-white rounded-2xl shadow-xl">
       <!-- Navigation -->
       <nav
@@ -79,6 +86,26 @@
     <footer class="mt-8 text-gray-500 text-sm text-center">
       &copy; 2025 HTMX-Z
     </footer>
-
+    <script>
+      function createWebSocket() {
+        const req = fetch("/");
+        const ws = new WebSocket(
+          (location.protocol === "https:" ? "wss://" : "ws://") +
+            location.host +
+            "/presence"
+        );
+        ws.onmessage = function (event) {
+          const data = JSON.parse(event.data);
+          if (data.type === "presence") {
+            document.getElementById("presence-count").innerText =
+              data.count.toString();
+          }
+        };
+        ws.onclose = function () {
+          // Try to reconnect every 5 seconds
+          setTimeout(createWebSocket, 5000);
+        };
+      }
+    </script>
   </body>
 </html>

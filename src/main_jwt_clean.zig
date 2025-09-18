@@ -5,6 +5,7 @@ const jwt = @import("jwt.zig");
 const database = @import("database.zig");
 const cart_manager = @import("cart_manager.zig");
 const templates = @import("templates.zig");
+const ws = @import("ws.zig");
 
 /// Application Context. Owns database and cart manager
 const AppContext = struct {
@@ -535,6 +536,37 @@ pub const CartStatsEndpoint = struct {
 // Global context for the Zap handler callback
 var app_context: *AppContext = undefined;
 
+// WebSocket upgrade handler
+fn on_upgrade(r: zap.Request, target_protocol: []const u8) !void {
+    // std.log.info("=== WebSocket upgrade requested ===", .{});
+    // std.log.info("Target protocol: {s}", .{target_protocol});
+
+    // Validate WebSocket protocol
+    if (!std.mem.eql(u8, target_protocol, "websocket")) {
+        std.log.info("Rejecting non-WebSocket protocol: {s}", .{target_protocol});
+        return;
+    }
+
+    // std.log.info("WebSocket upgrade accepted", .{});
+
+    // Validate JWT for WebSocket connections
+    const payload = validateJWT(r, app_context) orelse {
+        std.log.info("JWT validation failed for WebSocket upgrade", .{});
+        return; // Reject upgrade by returning without calling upgrade
+    };
+    defer jwt.deinitPayload(app_context.allocator, payload);
+
+    // std.log.info("Creating WebSocket context for user: {s}", .{payload.user_id});
+
+    // Upgrade to WebSocket with validated user_id
+    ws.upgradeToWebSocket(r, payload.user_id) catch |err| {
+        std.log.err("WebSocket upgrade failed in on_upgrade: {any}", .{err});
+        return;
+    };
+
+    // std.log.info("WebSocket upgrade completed successfully!", .{});
+}
+
 // Simple handler that uses endpoints
 fn simpleHandler(r: zap.Request) !void {
     const path = r.path orelse {
@@ -544,6 +576,7 @@ fn simpleHandler(r: zap.Request) !void {
     };
 
     const method = r.methodAsEnum();
+    // std.log.info("Request: {s} {s}", .{ @tagName(method), path });
 
     // Route to endpoints
     if (std.mem.eql(u8, path, "/") and method == .GET) {
@@ -617,12 +650,7 @@ fn simpleHandler(r: zap.Request) !void {
         return;
     }
 
-    // WebSocket token endpoint
-    // if (std.mem.eql(u8, path, "/presence") and method == .POST) {
-    //     var ws_token_endpoint = WebSocketTokenEndpoint.init(app_context);
-    //     try ws_token_endpoint.post(r);
-    //     return;
-    // }
+    // Note: WebSocket upgrades are now handled by the on_upgrade callback
 
     // Default 404
     r.setStatus(.not_found);
@@ -656,16 +684,21 @@ pub fn main() !void {
             allocator.destroy(ctx);
         }
 
-        // For now, let's use the simple HttpListener until we fix the endpoint path conflicts
+        // HTTP Listener with WebSocket upgrade support
         var listener = zap.HttpListener.init(.{
             .port = 8080,
             .on_request = simpleHandler,
+            .on_upgrade = on_upgrade, // Add WebSocket upgrade handler
             .log = false,
             .public_folder = "html",
         });
 
         // Store context for handler access
         app_context = ctx;
+
+        // Initialize WebSocket context manager
+        ws.initGlobalContextManager(allocator, ctx.cart_manager);
+        defer ws.deinitGlobalContextManager();
 
         try listener.listen();
 

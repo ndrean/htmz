@@ -18,6 +18,17 @@
   >
     <script src="htmx.min.js"></script>
     <script src="ws.min.js"></script>
+    <script>
+      // Handle minimal WebSocket messages (just numbers)
+      document.body.addEventListener('htmx:wsBeforeMessage', function(e) {
+        const message = e.detail.message;
+        // If message is just a number, update presence count innerHTML
+        if (/^\d+$/.test(message)) {
+          document.getElementById('presence-count').innerHTML = message;
+          e.preventDefault(); // Don't let HTMX process it as HTML
+        }
+      });
+    </script>
 
     <header class="mb-8 text-center">
       <h1 class="text-5xl font-extrabold text-blue-600">My Shopping Cart</h1>

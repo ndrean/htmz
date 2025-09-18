@@ -9,8 +9,7 @@ export const options = {
       stages: [
         { duration: "5s", target: 10 }, // Ramp to 10 VUs
         { duration: "10s", target: 50 }, // Ramp to 50 VUs
-        { duration: "10s", target: 100 }, // Ramp to 100 VUs
-        { duration: "10s", target: 100 }, // Hold at 100 VUs
+        { duration: "30s", target: 100 }, // Ramp to 100 VUs
         { duration: "5s", target: 0 }, // Ramp down
       ],
     },
@@ -23,7 +22,7 @@ export const options = {
 
 const BASE_URL = "http://localhost:8080"; // JWT + SQLite server
 
-const itemIds = [0, 1, 2, 3, 4, 5, 6, 7];
+const itemIds = [1, 2, 3, 4, 5, 6, 7];
 
 // Global JWT cookie for this VU
 let jwtCookie = null;
@@ -89,6 +88,7 @@ export default function () {
   check(response, {
     "decrease quantity status 200": (r) => r.status === 200,
   });
+  sleep(0.1);
 
   // 4. Remove from cart
   response = http.del(`${BASE_URL}/api/cart/remove/${randomItemId}`, null, {
@@ -100,7 +100,7 @@ export default function () {
   });
 
   // Minimal pause for high throughput
-  sleep(0.1);
+  sleep(0.2);
 }
 
 export function handleSummary(data) {

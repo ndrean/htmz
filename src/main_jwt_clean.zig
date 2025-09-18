@@ -1,4 +1,5 @@
 const std = @import("std");
+const builtin = @import("builtin");
 const zap = @import("zap");
 const jwt = @import("jwt.zig");
 const database = @import("database.zig");
@@ -240,7 +241,6 @@ fn handleCartOperation(r: zap.Request, action: CartAction, ctx: *AppContext) voi
         return;
     };
 
-
     // Validate JWT - redirect to / if missing/invalid
     const payload = validateJWT(r, ctx) orelse {
         r.setStatus(.found); // 302 redirect
@@ -248,7 +248,6 @@ fn handleCartOperation(r: zap.Request, action: CartAction, ctx: *AppContext) voi
         return;
     };
     defer jwt.deinitPayload(ctx.allocator, payload);
-
 
     switch (action) {
         .add => {
@@ -276,7 +275,6 @@ fn handleCartOperation(r: zap.Request, action: CartAction, ctx: *AppContext) voi
             };
         },
     }
-
 
     r.setStatus(.ok);
 
@@ -525,8 +523,10 @@ pub fn main() !void {
     }
 
     {
-        // Use C allocator for simplicity in this example
-        const allocator = std.heap.c_allocator;
+        const allocator = switch (builtin.mode) {
+            .Debug, .ReleaseSafe => gpa.allocator(),
+            .ReleaseFast, .ReleaseSmall => std.heap.c_allocator,
+        };
 
         // Initialize application context
         const ctx = try allocator.create(AppContext);
@@ -548,7 +548,7 @@ pub fn main() !void {
         try listener.listen();
 
         std.log.info("Server started on http://127.0.0.1:8080", .{});
-        zap.start(.{ .threads = 2, .workers = 1 });
+        zap.start(.{ .threads = 1, .workers = 1 });
     }
     const leaks = gpa.detectLeaks();
     std.debug.print("Leaks detected?: {}\n", .{leaks});

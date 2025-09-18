@@ -1,7 +1,7 @@
 //! Simple session utilities for user authentication only
 const std = @import("std");
 
-const SECRET_KEY = "your-simple-secret-key-12345";
+const SECRET_KEY = "secret-key-12345";
 
 pub const JWTPayload = struct {
     user_id: []const u8,
@@ -18,7 +18,7 @@ pub fn generateJWT(allocator: std.mem.Allocator, payload: JWTPayload) ![]u8 {
     // Convert to hex string manually
     var session_id: [32]u8 = undefined;
     for (random_bytes, 0..) |byte, i| {
-        _ = std.fmt.bufPrint(session_id[i*2..i*2+2], "{x:0>2}", .{byte}) catch unreachable;
+        _ = std.fmt.bufPrint(session_id[i * 2 .. i * 2 + 2], "{x:0>2}", .{byte}) catch unreachable;
     }
 
     // Create simple signature: HMAC of session_id
@@ -28,7 +28,7 @@ pub fn generateJWT(allocator: std.mem.Allocator, payload: JWTPayload) ![]u8 {
     // Convert signature to hex
     var signature_hex: [64]u8 = undefined;
     for (signature, 0..) |byte, i| {
-        _ = std.fmt.bufPrint(signature_hex[i*2..i*2+2], "{x:0>2}", .{byte}) catch unreachable;
+        _ = std.fmt.bufPrint(signature_hex[i * 2 .. i * 2 + 2], "{x:0>2}", .{byte}) catch unreachable;
     }
 
     // Combine session_id + signature (32 + 64 hex chars = 96 total)

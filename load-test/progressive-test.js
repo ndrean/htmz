@@ -64,11 +64,6 @@ export default function () {
   // 50-80s: 10K plateau (after 10s ramp, 30s hold)
   if (elapsedSeconds >= 50 && elapsedSeconds <= 80) currentStage = "plateau10k";
 
-  // Debug: Log stage transitions (only occasionally to avoid spam)
-  // if (Math.random() < 0.001) {
-  //   console.log(`[DEBUG] Elapsed: ${elapsedSeconds.toFixed(1)}s, Stage: ${currentStage}`);
-  // }
-
   const randomItemId = itemIds[Math.floor(Math.random() * itemIds.length)];
 
   // Headers with current JWT as cookie
@@ -96,7 +91,7 @@ export default function () {
   check(response, {
     "add to cart status 200": (r) => r.status === 200,
   });
-  sleep(0.1);
+  sleep(0.2);
 
   // 2. Remove from cart (simplified for extreme load)
   response = http.del(`${BASE_URL}/api/cart/remove/${randomItemId}`, null, {

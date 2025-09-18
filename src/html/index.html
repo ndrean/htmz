@@ -86,35 +86,5 @@
     <footer class="mt-8 text-gray-500 text-sm text-center">
       &copy; 2025 HTMX-Z
     </footer>
-    <script>
-      async function createWebSocket() {
-        try {
-          const response = await fetch("/ws-token", {
-            method: "POST",
-            credentials: "include", // Include cookies for JWT authentication
-          });
-
-          if (!response.ok) {
-            console.error("Failed to get WebSocket token:", response.status);
-            return null;
-          }
-
-          const data = await response.json();
-
-          return new WebSocket(
-            (location.protocol === "https:" ? "wss://" : "ws://") +
-              location.host +
-              "/presence" +
-              "?user=" +
-              data.token
-          );
-        } catch (error) {
-          console.error("Error getting WebSocket token:", error);
-          return null;
-        }
-      }
-
-      ws;
-    </script>
   </body>
 </html>

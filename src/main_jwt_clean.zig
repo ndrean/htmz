@@ -17,6 +17,7 @@ const AppContext = struct {
     pub fn init(allocator: std.mem.Allocator) !AppContext {
         // Heap allocation needed because cart_manager needs mutable reference to database
         const db = try allocator.create(database.Database);
+        // used .Memory for simplicity, so path is userless in fact
         db.* = try database.Database.init(allocator, "htmz.sql3");
 
         const cm = try allocator.create(cart_manager.CartManager);
@@ -72,23 +73,30 @@ fn validateJWT(r: zap.Request, ctx: *AppContext) ?jwt.JWTPayload {
     return null; // No JWT cookie found
 }
 
+// JWT validation for protected routes - returns payload or sends redirect
+fn validateJWTOrRedirect(r: zap.Request, ctx: *AppContext) ?jwt.JWTPayload {
+    if (validateJWT(r, ctx)) |payload| {
+        return payload;
+    } else {
+        // Invalid/missing JWT - redirect to home page
+        r.setStatus(.found); // 302 redirect
+        r.setHeader("Location", "/") catch {};
+        return null;
+    }
+}
+
 // Create new JWT - ONLY used in sendFullPage for GET /
 fn createNewJWTUser(ctx: *AppContext) !jwt.JWTPayload {
-    const user_id = try std.fmt.allocPrint(ctx.allocator, "user_{d}_{d}", .{ std.time.timestamp(), std.crypto.random.int(u32) });
+    const user_id = try std.fmt.allocPrint(
+        ctx.allocator,
+        "user_{d}_{d}",
+        .{ std.time.timestamp(), std.crypto.random.int(u32) },
+    );
 
     return jwt.JWTPayload{
         .user_id = user_id,
         .exp = std.time.timestamp() + 3600, // 1 hour expiry
     };
-}
-
-// Get or create JWT - ONLY used in sendFullPage
-fn getOrCreateJWTForHomePage(r: zap.Request, ctx: *AppContext) !jwt.JWTPayload {
-    if (validateJWT(r, ctx)) |payload| {
-        return payload;
-    } else {
-        return createNewJWTUser(ctx);
-    }
 }
 
 // Main request handler with context and early return style
@@ -101,7 +109,7 @@ fn onRequest(r: zap.Request, ctx: *AppContext) !void {
 
     const method = r.methodAsEnum();
 
-    // Early return routing style - much cleaner than if-else chains
+    // Public routes (no JWT required)
     if (std.mem.eql(u8, path, "/") and method == .GET) {
         sendFullPage(r, ctx);
         return;
@@ -129,36 +137,6 @@ fn onRequest(r: zap.Request, ctx: *AppContext) !void {
         return;
     }
 
-    if (std.mem.eql(u8, path, "/api/items") and method == .GET) {
-        handleItemsList(r, ctx);
-        return;
-    }
-
-    if (std.mem.eql(u8, path, "/api/cart") and method == .GET) {
-        handleCartDisplay(r, ctx);
-        return;
-    }
-
-    if (std.mem.startsWith(u8, path, "/api/cart/add/") and method == .POST) {
-        handleCartOperation(r, .add, ctx);
-        return;
-    }
-
-    if (std.mem.startsWith(u8, path, "/api/cart/increase-quantity/") and method == .POST) {
-        handleCartOperation(r, .increase, ctx);
-        return;
-    }
-
-    if (std.mem.startsWith(u8, path, "/api/cart/decrease-quantity/") and method == .POST) {
-        handleCartOperation(r, .decrease, ctx);
-        return;
-    }
-
-    if (std.mem.startsWith(u8, path, "/api/cart/remove/") and method == .DELETE) {
-        handleCartOperation(r, .remove, ctx);
-        return;
-    }
-
     if (std.mem.startsWith(u8, path, "/api/item-details/") and method == .GET) {
         handleItemDetails(r, ctx);
         return;
@@ -171,13 +149,75 @@ fn onRequest(r: zap.Request, ctx: *AppContext) !void {
         return;
     }
 
+    // Protected routes - JWT validation required
+    const payload = validateJWTOrRedirect(r, ctx) orelse return;
+    defer jwt.deinitPayload(ctx.allocator, payload);
+
+    if (std.mem.eql(u8, path, "/api/items") and method == .GET) {
+        handleItemsList(
+            r,
+            ctx,
+            payload,
+        );
+        return;
+    }
+
+    if (std.mem.eql(u8, path, "/api/cart") and method == .GET) {
+        handleCartDisplay(
+            r,
+            ctx,
+            payload,
+        );
+        return;
+    }
+
+    if (std.mem.startsWith(u8, path, "/api/cart/add/") and method == .POST) {
+        handleCartOperation(
+            r,
+            .add,
+            ctx,
+            payload,
+        );
+        return;
+    }
+
+    if (std.mem.startsWith(u8, path, "/api/cart/increase-quantity/") and method == .POST) {
+        handleCartOperation(
+            r,
+            .increase,
+            ctx,
+            payload,
+        );
+        return;
+    }
+
+    if (std.mem.startsWith(u8, path, "/api/cart/decrease-quantity/") and method == .POST) {
+        handleCartOperation(
+            r,
+            .decrease,
+            ctx,
+            payload,
+        );
+        return;
+    }
+
+    if (std.mem.startsWith(u8, path, "/api/cart/remove/") and method == .DELETE) {
+        handleCartOperation(
+            r,
+            .remove,
+            ctx,
+            payload,
+        );
+        return;
+    }
+
     if (std.mem.eql(u8, path, "/cart-count") and method == .GET) {
-        handleCartCount(r, ctx);
+        handleCartCount(r, ctx, payload);
         return;
     }
 
     if (std.mem.eql(u8, path, "/cart-total") and method == .GET) {
-        handleCartTotal(r, ctx);
+        handleCartTotal(r, ctx, payload);
         return;
     }
 
@@ -188,27 +228,34 @@ fn onRequest(r: zap.Request, ctx: *AppContext) !void {
 
 // Route handler functions
 fn sendFullPage(r: zap.Request, ctx: *AppContext) void {
-    const payload = getOrCreateJWTForHomePage(r, ctx) catch {
-        r.setStatus(.internal_server_error);
-        return;
-    };
-    defer jwt.deinitPayload(ctx.allocator, payload);
+    // Only create/set JWT if user doesn't have valid one
+    if (validateJWT(r, ctx)) |payload| {
+        defer jwt.deinitPayload(ctx.allocator, payload);
+        // User already has valid session - just serve the page
+    } else {
+        // No valid JWT - create new session
+        const payload = createNewJWTUser(ctx) catch {
+            r.setStatus(.internal_server_error);
+            return;
+        };
+        defer jwt.deinitPayload(ctx.allocator, payload);
 
-    const token = jwt.generateJWT(ctx.allocator, payload) catch {
-        r.setStatus(.internal_server_error);
-        return;
-    };
-    defer ctx.allocator.free(token);
+        const token = jwt.generateJWT(ctx.allocator, payload) catch {
+            r.setStatus(.internal_server_error);
+            return;
+        };
+        defer ctx.allocator.free(token);
 
-    // Set JWT in cookie only (headers are useless for HTMX)
-    r.setCookie(.{
-        .http_only = true,
-        .path = "/",
-        .name = "jwt_token",
-        .value = token,
-        .same_site = .Lax,
-        .max_age_s = 3600,
-    }) catch {};
+        // Set JWT in cookie only (headers are useless for HTMX)
+        r.setCookie(.{
+            .http_only = true,
+            .path = "/",
+            .name = "jwt_token",
+            .value = token,
+            .same_site = .Lax,
+            .max_age_s = 3600,
+        }) catch {};
+    }
 
     r.setStatus(.ok);
     r.setContentType(.HTML) catch return;
@@ -216,7 +263,7 @@ fn sendFullPage(r: zap.Request, ctx: *AppContext) void {
     r.sendFile("src/html/index.html") catch return;
 }
 
-fn handleCartOperation(r: zap.Request, action: CartAction, ctx: *AppContext) void {
+fn handleCartOperation(r: zap.Request, action: CartAction, ctx: *AppContext, payload: jwt.JWTPayload) void {
     const path = r.path orelse {
         r.setStatus(.bad_request);
         return;
@@ -240,14 +287,6 @@ fn handleCartOperation(r: zap.Request, action: CartAction, ctx: *AppContext) voi
         r.setStatus(.bad_request);
         return;
     };
-
-    // Validate JWT - redirect to / if missing/invalid
-    const payload = validateJWT(r, ctx) orelse {
-        r.setStatus(.found); // 302 redirect
-        r.setHeader("Location", "/") catch {};
-        return;
-    };
-    defer jwt.deinitPayload(ctx.allocator, payload);
 
     switch (action) {
         .add => {
@@ -357,14 +396,7 @@ fn generateCartHTMLFromDB(user_id: []const u8, ctx: *AppContext) ![]u8 {
     return try cart_html.toOwnedSlice(ctx.allocator);
 }
 
-fn handleCartDisplay(r: zap.Request, ctx: *AppContext) void {
-    const payload = validateJWT(r, ctx) orelse {
-        r.setStatus(.found); // 302 redirect
-        r.setHeader("Location", "/") catch {};
-        return;
-    };
-    defer jwt.deinitPayload(ctx.allocator, payload);
-
+fn handleCartDisplay(r: zap.Request, ctx: *AppContext, payload: jwt.JWTPayload) void {
     const cart_html = generateCartHTMLFromDB(payload.user_id, ctx) catch {
         r.setStatus(.internal_server_error);
         return;
@@ -414,14 +446,7 @@ fn handleItemDetails(r: zap.Request, ctx: *AppContext) void {
     r.sendBody(item_html) catch return;
 }
 
-fn handleCartCount(r: zap.Request, ctx: *AppContext) void {
-    const payload = validateJWT(r, ctx) orelse {
-        r.setStatus(.found); // 302 redirect
-        r.setHeader("Location", "/") catch {};
-        return;
-    };
-    defer jwt.deinitPayload(ctx.allocator, payload);
-
+fn handleCartCount(r: zap.Request, ctx: *AppContext, payload: jwt.JWTPayload) void {
     const count = ctx.cart_manager.getCartCount(payload.user_id) catch {
         r.setStatus(.ok);
         r.setContentType(.HTML) catch return;
@@ -440,7 +465,8 @@ fn handleCartCount(r: zap.Request, ctx: *AppContext) void {
     r.sendBody(count_str) catch return;
 }
 
-fn handleItemsList(r: zap.Request, ctx: *AppContext) void {
+fn handleItemsList(r: zap.Request, ctx: *AppContext, payload: jwt.JWTPayload) void {
+    _ = payload; // Not used in this handler but required for consistency
     const items = ctx.database.getAllGroceryItems(ctx.allocator) catch {
         r.setStatus(.internal_server_error);
         return;
@@ -475,14 +501,7 @@ fn handleItemsList(r: zap.Request, ctx: *AppContext) void {
     r.sendBody(items_html.items) catch return;
 }
 
-fn handleCartTotal(r: zap.Request, ctx: *AppContext) void {
-    const payload = validateJWT(r, ctx) orelse {
-        r.setStatus(.found); // 302 redirect
-        r.setHeader("Location", "/") catch {};
-        return;
-    };
-    defer jwt.deinitPayload(ctx.allocator, payload);
-
+fn handleCartTotal(r: zap.Request, ctx: *AppContext, payload: jwt.JWTPayload) void {
     const total = ctx.cart_manager.getCartTotal(ctx.allocator, payload.user_id) catch {
         r.setStatus(.ok);
         r.setContentType(.HTML) catch return;

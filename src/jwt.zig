@@ -8,8 +8,18 @@ pub const JWTPayload = struct {
     exp: i64,
 };
 
-pub fn generateJWT(allocator: std.mem.Allocator, payload: JWTPayload) ![]u8 {
-    _ = payload; // We don't use payload in simplified version
+/// We generate a simplified JWT-like token for session management.
+/// The token is not a standard JWT, but a custom format for simplicity
+///
+/// The token is a hex string of 96 characters (48 bytes)
+/// The token consists of:
+/// - a random session_id, random 16-byte value represented as 32 hex characters
+/// - followed by its HMAC-SHA256 signature using SECRET_KEY, represented as 64 hex characters
+///
+/// Hex characters are safe in HTTP headers and cookies.
+///
+/// Total token length is 96 hex characters. No padding, no base64, just hex.
+pub fn generateJWT(allocator: std.mem.Allocator, _: JWTPayload) ![]u8 {
 
     // Generate a simple random session string
     var random_bytes: [16]u8 = undefined;
@@ -37,6 +47,10 @@ pub fn generateJWT(allocator: std.mem.Allocator, payload: JWTPayload) ![]u8 {
     return token;
 }
 
+/// Verify the JWT token and return the payload if valid
+/// In this simplified version, we only check the signature and return a dummy user_id
+/// In a real implementation, you would decode the payload and verify the exp field
+/// Here, we assume the user_id is embedded in the session_id for demonstration purposes
 pub fn verifyJWT(allocator: std.mem.Allocator, token: []const u8) !JWTPayload {
     // Token should be 96 hex chars (32 session + 64 signature)
     if (token.len != 96) {

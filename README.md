@@ -278,3 +278,32 @@ Avg Response Time: 15.40ms
 running (1m30.3s), 00000/10000 VUs, 1708878 complete and 0 interrupted iterations
 progressive_load ✓ [======================================] 00000/10000 VUs  1m30s
 ```
+
+## Notes
+
+- grab a cookie for testing:
+
+```sh
+curl -v -c cookies.txt http://localhost:8080/
+```
+
+- pass the cookie for testing:
+
+```sh
+curl -v -H "Cookie: jwt_token=test" http://localhost:8080/api/items
+```
+
+- test public endpoint:
+
+```sh
+curl -v http://localhost:8080/groceries
+```
+
+- Useful!:
+
+```sh
+pkill -f "htmz"
+
+lsof -ti:8080 | xargs kill
+kill sell: xxxx
+```

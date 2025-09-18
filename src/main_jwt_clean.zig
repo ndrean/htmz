@@ -617,6 +617,13 @@ fn simpleHandler(r: zap.Request) !void {
         return;
     }
 
+    // WebSocket token endpoint
+    // if (std.mem.eql(u8, path, "/presence") and method == .POST) {
+    //     var ws_token_endpoint = WebSocketTokenEndpoint.init(app_context);
+    //     try ws_token_endpoint.post(r);
+    //     return;
+    // }
+
     // Default 404
     r.setStatus(.not_found);
     r.sendBody("404 - Not Found") catch return;

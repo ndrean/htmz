@@ -567,7 +567,7 @@ pub fn main() !void {
         try listener.listen();
 
         std.log.info("Server started on http://127.0.0.1:8080", .{});
-        zap.start(.{ .threads = 1, .workers = 1 });
+        zap.start(.{ .threads = 2, .workers = 1 });
     }
     const leaks = gpa.detectLeaks();
     std.debug.print("Leaks detected?: {}\n", .{leaks});

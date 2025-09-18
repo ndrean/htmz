@@ -55,22 +55,10 @@ pub const CartManager = struct {
     }
 
     pub fn addToCart(self: *CartManager, user_id: []const u8, item_id: u32) !void {
-        // Try read lock first to check if user exists
-        self.rwlock.lockShared();
-        const user_exists = self.user_carts.contains(user_id);
-        self.rwlock.unlockShared();
+        self.rwlock.lock();
+        defer self.rwlock.unlock();
 
-        // If user doesn't exist, get write lock to create
-        if (!user_exists) {
-            self.rwlock.lock();
-            defer self.rwlock.unlock();
-            try self.ensureUserCartExists(user_id);
-        }
-
-        // Now get read lock and modify user's cart
-        self.rwlock.lockShared();
-        defer self.rwlock.unlockShared();
-
+        try self.ensureUserCartExists(user_id);
         var cart = self.user_carts.getPtr(user_id).?;
         if (cart.getPtr(item_id)) |existing_quantity| {
             existing_quantity.* += 1;
@@ -80,8 +68,8 @@ pub const CartManager = struct {
     }
 
     pub fn removeFromCart(self: *CartManager, user_id: []const u8, item_id: u32) !void {
-        self.rwlock.lockShared();
-        defer self.rwlock.unlockShared();
+        self.rwlock.lock();
+        defer self.rwlock.unlock();
 
         if (self.user_carts.getPtr(user_id)) |cart| {
             _ = cart.remove(item_id);
@@ -89,8 +77,8 @@ pub const CartManager = struct {
     }
 
     pub fn increaseQuantity(self: *CartManager, user_id: []const u8, item_id: u32) !void {
-        self.rwlock.lockShared();
-        defer self.rwlock.unlockShared();
+        self.rwlock.lock();
+        defer self.rwlock.unlock();
 
         if (self.user_carts.getPtr(user_id)) |cart| {
             if (cart.getPtr(item_id)) |quantity| {
@@ -100,8 +88,8 @@ pub const CartManager = struct {
     }
 
     pub fn decreaseQuantity(self: *CartManager, user_id: []const u8, item_id: u32) !void {
-        self.rwlock.lockShared();
-        defer self.rwlock.unlockShared();
+        self.rwlock.lock();
+        defer self.rwlock.unlock();
 
         if (self.user_carts.getPtr(user_id)) |cart| {
             if (cart.getPtr(item_id)) |quantity| {
@@ -197,8 +185,8 @@ pub const CartManager = struct {
     }
 
     pub fn clearCart(self: *CartManager, user_id: []const u8) !void {
-        self.rwlock.lockShared();
-        defer self.rwlock.unlockShared();
+        self.rwlock.lock();
+        defer self.rwlock.unlock();
 
         if (self.user_carts.getPtr(user_id)) |cart| {
             cart.clearAndFree();

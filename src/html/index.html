@@ -87,25 +87,34 @@
       &copy; 2025 HTMX-Z
     </footer>
     <script>
-      function createWebSocket() {
-        const req = fetch("/");
-        const ws = new WebSocket(
-          (location.protocol === "https:" ? "wss://" : "ws://") +
-            location.host +
-            "/presence"
-        );
-        ws.onmessage = function (event) {
-          const data = JSON.parse(event.data);
-          if (data.type === "presence") {
-            document.getElementById("presence-count").innerText =
-              data.count.toString();
+      async function createWebSocket() {
+        try {
+          const response = await fetch("/ws-token", {
+            method: "POST",
+            credentials: "include", // Include cookies for JWT authentication
+          });
+
+          if (!response.ok) {
+            console.error("Failed to get WebSocket token:", response.status);
+            return null;
           }
-        };
-        ws.onclose = function () {
-          // Try to reconnect every 5 seconds
-          setTimeout(createWebSocket, 5000);
-        };
+
+          const data = await response.json();
+
+          return new WebSocket(
+            (location.protocol === "https:" ? "wss://" : "ws://") +
+              location.host +
+              "/presence" +
+              "?user=" +
+              data.token
+          );
+        } catch (error) {
+          console.error("Error getting WebSocket token:", error);
+          return null;
+        }
       }
+
+      ws;
     </script>
   </body>
 </html>

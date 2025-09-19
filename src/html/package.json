@@ -3,7 +3,8 @@
   "private": true,
   "scripts": {
     "build:css": "tailwindcss -i input.css -o index.css --minify",
-    "build:js": "cp node_modules/htmx-ext-ws/dist/ws.min.js.gz node_modules/htmx.org/dist/htmx.min.js.gz . && gzip -k index.html index.css"
+    "htmx": "cp node_modules/htmx-ext-ws/dist/ws.min.js.gz node_modules/htmx.org/dist/htmx.min.js.gz .",
+    "make:public": "gzip -k index.html index.css && cp *.gz ../../public/"
   },
   "packageManager": "pnpm@10.16.1",
   "devDependencies": {

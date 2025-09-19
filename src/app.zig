@@ -144,7 +144,7 @@ pub const HomeEndpoint = struct {
         r.setStatus(.ok);
         r.setContentType(.HTML) catch return;
         // Use sendFile: facil.io sends gz if exists
-        r.sendFile("src/html/index.html") catch return;
+        r.sendFile("public/index.html") catch return;
     }
 };
 
@@ -549,7 +549,7 @@ fn on_upgrade(r: zap.Request, target_protocol: []const u8) !void {
 
     // std.log.info("WebSocket upgrade accepted", .{});
 
-    // Validate JWT for WebSocket connections
+    // Validate JWT for WebSocket connections : send a fake if for testing
     const payload = validateJWT(r, app_context) orelse {
         std.log.info("JWT validation failed for WebSocket upgrade", .{});
         return; // Reject upgrade by returning without calling upgrade
@@ -557,8 +557,9 @@ fn on_upgrade(r: zap.Request, target_protocol: []const u8) !void {
     defer jwt.deinitPayload(app_context.allocator, payload);
 
     // std.log.info("Creating WebSocket context for user: {s}", .{payload.user_id});
+    // const user_id = "user-123345";
 
-    // Upgrade to WebSocket with validated user_id
+    // Upgrade to WebSocket with validated payload.user_id
     ws.upgradeToWebSocket(r, payload.user_id) catch |err| {
         std.log.err("WebSocket upgrade failed in on_upgrade: {any}", .{err});
         return;
@@ -576,7 +577,7 @@ fn simpleHandler(r: zap.Request) !void {
     };
 
     const method = r.methodAsEnum();
-    // std.log.info("Request: {s} {s}", .{ @tagName(method), path });
+    std.log.info("Request: {s} {s}", .{ @tagName(method), path });
 
     // Route to endpoints
     if (std.mem.eql(u8, path, "/") and method == .GET) {
@@ -586,27 +587,24 @@ fn simpleHandler(r: zap.Request) !void {
     }
 
     if (std.mem.eql(u8, path, "/index.css") and method == .GET) {
-        // var static_endpoint = CssEndpoint.init(app_context);
-        // try static_endpoint.get(r);
-        // return;
         r.setStatus(.ok);
         r.setHeader("Content-Type", "text/css") catch return;
         r.setHeader("Cache-Control", "public, max-age=3600") catch return;
-        r.sendFile("src/html/index.css") catch return;
+        r.sendFile("public/index.css") catch return;
         return;
     }
     if (std.mem.eql(u8, path, "/htmx.min.js") and method == .GET) {
         r.setStatus(.ok);
         r.setHeader("Content-Type", "application/javascript") catch return;
         r.setHeader("Cache-Control", "public, max-age=3600") catch return;
-        r.sendFile("src/html/htmx.min.js") catch return;
+        r.sendFile("public/htmx.min.js") catch return;
         return;
     }
     if (std.mem.eql(u8, path, "/ws.min.js") and method == .GET) {
         r.setStatus(.ok);
         r.setHeader("Content-Type", "application/javascript") catch return;
         r.setHeader("Cache-Control", "public, max-age=3600") catch return;
-        r.sendFile("src/html/ws.min.js") catch return;
+        r.sendFile("public/ws.min.js") catch return;
         return;
     }
 
@@ -689,8 +687,8 @@ pub fn main() !void {
             .port = 8080,
             .on_request = simpleHandler,
             .on_upgrade = on_upgrade, // Add WebSocket upgrade handler
-            .log = false,
-            .public_folder = "html",
+            .log = true,
+            // .public_folder = "src/html",
         });
 
         // Store context for handler access

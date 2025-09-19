@@ -4,7 +4,6 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>HTMX-Z Demo</title>
-    <!--<script src="https://unpkg.com/htmx.org@1.9.10"></script>-->
     <link rel="stylesheet" href="index.css" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -16,20 +15,6 @@
   <body
     class="bg-gray-50 min-h-screen flex flex-col items-center p-6 font-inter"
   >
-    <script src="htmx.min.js"></script>
-    <script src="ws.min.js"></script>
-    <script>
-      // Handle minimal WebSocket messages (just numbers)
-      document.body.addEventListener('htmx:wsBeforeMessage', function(e) {
-        const message = e.detail.message;
-        // If message is just a number, update presence count innerHTML
-        if (/^\d+$/.test(message)) {
-          document.getElementById('presence-count').innerHTML = message;
-          e.preventDefault(); // Don't let HTMX process it as HTML
-        }
-      });
-    </script>
-
     <header class="mb-8 text-center">
       <h1 class="text-5xl font-extrabold text-blue-600">My Shopping Cart</h1>
       <p class="text-md text-gray-500 mt-2">
@@ -43,7 +28,12 @@
         <code>HashMap</code>
       </p>
       <p class="text-md text-gray-500 mt-1" hx-ext="ws" ws-connect="/presence">
-        Presence: <span id="presence-count">0</span> users online
+        Presence:
+        <span
+          class="ml-2 bg-green-800 text-white text-base font-bold px-2 py-1 rounded-full"
+          ><span id="presence-count">0</span></span
+        >
+        users online
       </p>
     </header>
 
@@ -66,7 +56,7 @@
           hx-target="#content"
           hx-push-url="true"
           hx-trigger="click"
-          >Shopping List
+          >Shopping List &nbsp
           <span
             id="cart-badge"
             class="ml-2 bg-red-500 text-white text-xs font-bold px-2 py-1 rounded-full"
@@ -97,5 +87,16 @@
     <footer class="mt-8 text-gray-500 text-sm text-center">
       &copy; 2025 HTMX-Z
     </footer>
+    <script src="htmx.min.js"></script>
+    <script src="ws.min.js"></script>
+    <script>
+      document.body.addEventListener("htmx:wsBeforeMessage", function (e) {
+        e.preventDefault(); // Don't let HTMX process it as HTML
+        // If message is just a number, update presence count innerHTML
+        // if (/^\d+$/.test(message)) {
+        document.getElementById("presence-count").innerHTML = e.detail.message;
+        // }
+      });
+    </script>
   </body>
 </html>

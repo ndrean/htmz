@@ -17,24 +17,28 @@
   >
     <header class="mb-8 text-center">
       <h1 class="text-5xl font-extrabold text-blue-600">My Shopping Cart</h1>
+      <p class="text-md text-gray-500 mt-1">
+        SSR with <code>Zig</code> with <code>Zap</code> and
+        <code>zig-sqlite</code>
+      </p>
       <p class="text-md text-gray-500 mt-2">
         Frontend: <code>HTMX</code> & <code>TailwindCSS</code>
       </p>
       <p class="text-md text-gray-500 mt-1">
-        Backend: <code>Zig</code>, <code>Zap</code>, <code>zig-sqlite</code>
+        Authentication: auto-generated <code>pseudo JWT</code>
       </p>
       <p class="text-md text-gray-500 mt-1">
-        Authentication: <code>JWT</code>, Shopping Cart: stored in
-        <code>HashMap</code>
+        Shopping Cart: stored in <code>HashMap</code>
       </p>
-      <p class="text-md text-gray-500 mt-1" hx-ext="ws" ws-connect="/presence">
-        Presence:
+      <!--<p class="text-md text-gray-500 mt-1" hx-ext="ws" ws-connect="/presence">
+        Presence via a WebSocket: &nbsp
         <span
-          class="ml-2 bg-green-800 text-white text-base font-bold px-2 py-1 rounded-full"
-          ><span id="presence-count">0</span></span
+          id="presence-count"
+          class="ml-2 bg-green-500 text-white text-base font-bold px-2 py-1 rounded-full"
+          >0</span
         >
         users online
-      </p>
+      </p>-->
     </header>
 
     <main class="w-full max-w-6xl p-8 bg-white rounded-2xl shadow-xl">
@@ -91,11 +95,24 @@
     <script src="ws.min.js"></script>
     <script>
       document.body.addEventListener("htmx:wsBeforeMessage", function (e) {
-        e.preventDefault(); // Don't let HTMX process it as HTML
+        const message = e.detail.message;
         // If message is just a number, update presence count innerHTML
-        // if (/^\d+$/.test(message)) {
-        document.getElementById("presence-count").innerHTML = e.detail.message;
-        // }
+        if (/^\d+$/.test(message)) {
+          document.getElementById("presence-count").innerHTML = message;
+          e.preventDefault(); // Don't let HTMX process it as HTML
+        }
+      });
+
+      // Keep WebSocket alive with periodic pings
+      document.body.addEventListener("htmx:wsOpen", function (e) {
+        const socketWrapper = e.detail.socketWrapper;
+        if (socketWrapper && socketWrapper.send) {
+          setInterval(() => {
+            socketWrapper.send("ping");
+          }, 30000); // Every 30 seconds
+        } else {
+          console.error("Could not find socketWrapper.send method");
+        }
       });
     </script>
   </body>

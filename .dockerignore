@@ -1,0 +1,38 @@
+# Build artifacts (keep zig-out/ and libfacil.io.so for Docker builds)
+# zig-out/
+.zig-cache/
+# Allow specific shared library
+!.zig-cache/o/*/libfacil.io.so
+
+# Development files
+*.md
+README*
+load-test/
+test_cookies.txt
+src/
+
+# Old files (we use public/ now)
+src/main.zig
+src/main_jwt_clean.zig
+
+# Git
+.git/
+.gitignore
+
+# IDE
+.vscode/
+.idea/
+
+# macOS
+.DS_Store
+
+# Logs
+*.log
+
+# Database files (will be created in container)
+*.sql3
+*.db
+
+# Docker
+Dockerfile
+.dockerignore

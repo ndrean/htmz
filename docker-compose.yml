@@ -1,0 +1,54 @@
+services:
+  htmz:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    environment:
+      - SECRET_KEY=1234
+    ports:
+      - "8080:8080"  # Expose for direct testing
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '4.0'
+          memory: 2G
+        reservations:
+          cpus: '2.0'
+          memory: 1G
+    ulimits:
+      nofile:
+        soft: 65536
+        hard: 65536
+
+  k6:
+    image: grafana/k6:latest
+    volumes:
+      - ./load-test:/scripts
+    environment:
+      - BASE_URL=http://htmz:8080
+    depends_on:
+      - htmz
+    command: run /scripts/progressive-test.js
+    profiles:
+      - test
+
+  caddy:
+    image: caddy:2-alpine
+    ports:
+      - "4000:3000"
+    volumes:
+      - ./Caddyfile.local:/etc/caddy/Caddyfile:ro
+    depends_on:
+      - htmz
+    restart: unless-stopped
+
+  nginx:
+    image: nginx:alpine
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      - htmz
+    restart: unless-stopped

@@ -138,6 +138,7 @@ pub const HomeEndpoint = struct {
                 .value = token,
                 .same_site = .Lax,
                 .max_age_s = 3600,
+                .secure = false, // Allow over HTTP for testing
             }) catch {};
         }
 
@@ -347,8 +348,8 @@ pub const CartEndpoint = struct {
 
         r.setStatus(.ok);
 
-        // Trigger cart count update for all actions
-        r.setHeader("HX-Trigger", "updateCartCount") catch {};
+        // Trigger cart count and total update for all actions
+        r.setHeader("HX-Trigger", "updateCartCount, cartUpdate") catch {};
 
         if (action == .increase or action == .decrease or action == .remove) {
             // For quantity updates, we need to check if item still exists and return appropriate response
@@ -577,7 +578,7 @@ fn simpleHandler(r: zap.Request) !void {
     };
 
     const method = r.methodAsEnum();
-    std.log.info("Request: {s} {s}", .{ @tagName(method), path });
+    // std.log.info("Request: {s} {s}", .{ @tagName(method), path });
 
     // Route to endpoints
     if (std.mem.eql(u8, path, "/") and method == .GET) {
@@ -685,9 +686,10 @@ pub fn main() !void {
         // HTTP Listener with WebSocket upgrade support
         var listener = zap.HttpListener.init(.{
             .port = 8080,
+            .interface = "0.0.0.0", // Listen on all interfaces for Docker
             .on_request = simpleHandler,
             .on_upgrade = on_upgrade, // Add WebSocket upgrade handler
-            .log = true,
+            .log = false,
             // .public_folder = "src/html",
         });
 
@@ -700,7 +702,7 @@ pub fn main() !void {
 
         try listener.listen();
 
-        std.log.info("Server started on http://127.0.0.1:8080", .{});
+        std.log.info("Server started on http://0.0.0.0:8080", .{});
         zap.start(.{ .threads = 2, .workers = 1 });
     }
     const leaks = gpa.detectLeaks();

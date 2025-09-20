@@ -122,6 +122,12 @@ fn on_open_websocket(context: ?*Context, handle: WebSockets.WsHandle) !void {
 fn on_close_websocket(context: ?*Context, uuid: isize) !void {
     _ = uuid;
     if (context) |ctx| {
+        // Clear user's shopping cart when they disconnect FIRST
+        // (before cleaning up memory that clearCart needs)
+        GlobalContextManager.cart_manager.clearCart(ctx.user_id) catch |err| {
+            std.log.warn("Failed to clear cart for user {s}: {any}", .{ ctx.user_id, err });
+        };
+
         // Remove context from manager
         GlobalContextManager.removeContext(ctx);
 
@@ -136,14 +142,8 @@ fn on_close_websocket(context: ?*Context, uuid: isize) !void {
 
         // Publish to presence channel
         WebsocketHandler.publish(.{ .channel = ctx.channel, .message = message });
-        // std.log.info("User {s} disconnected. Total users: {d}", .{ ctx.user_id, count });
 
-        // Clear user's shopping cart when they disconnect
-        GlobalContextManager.cart_manager.clearCart(ctx.user_id) catch |err| {
-            std.log.warn("Failed to clear cart for user {s}: {any}", .{ ctx.user_id, err });
-        };
-
-        // Clean up context
+        // Clean up context memory LAST
         GlobalContextManager.allocator.free(ctx.user_id);
         GlobalContextManager.allocator.destroy(ctx);
     }
@@ -152,8 +152,11 @@ fn on_close_websocket(context: ?*Context, uuid: isize) !void {
 fn handle_websocket_message(context: ?*Context, handle: WebSockets.WsHandle, message: []const u8, is_text: bool) !void {
     _ = context;
     _ = handle;
-    _ = message;
     _ = is_text;
+    if (std.mem.eql(u8, message, "ping")) {
+        // Ignore ping messages
+        return;
+    }
     // For presence, we don't need to handle incoming messages
     // This is just for maintaining the connection
 }

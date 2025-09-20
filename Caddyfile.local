@@ -1,0 +1,31 @@
+:3000 {
+    reverse_proxy htmz:8080 {
+        # Load balancing and health check settings
+        health_timeout 30s
+        header_up Connection "keep-alive"
+    }
+
+    # Don't cache dynamic endpoints (this must come FIRST)
+    @dynamic {
+        path /cart-count
+        path /cart-total
+        path /api/*
+        path /ws
+    }
+    header @dynamic Cache-Control "no-cache, no-store, must-revalidate"
+
+    # Cache static assets
+    @static {
+        path *.css *.js *.png *.jpg *.jpeg *.gif *.svg *.ico
+    }
+    header @static Cache-Control "public, max-age=3600"
+
+    # Cache landing page briefly
+    @landing {
+        path /
+    }
+    header @landing Cache-Control "public, max-age=60"
+
+    # Disable gzip compression for load testing (reduces CPU overhead)
+    # encode gzip
+}

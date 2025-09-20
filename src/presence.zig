@@ -37,7 +37,7 @@ pub const Presence = struct {
         defer self.mutex.unlock();
 
         try self.connections.put(presence_id, {});
-        std.log.info("Added presence_id {d} to connections", .{presence_id});
+        // std.log.info("Added presence_id {d} to connections", .{presence_id});
     }
 
     /// Remove a user connection
@@ -46,7 +46,7 @@ pub const Presence = struct {
         defer self.mutex.unlock();
 
         _ = self.connections.remove(presence_id);
-        std.log.info("Removed presence_id {d} from connections", .{presence_id});
+        // std.log.info("Removed presence_id {d} from connections", .{presence_id});
     }
 
     /// Get current user count
@@ -59,7 +59,7 @@ pub const Presence = struct {
     /// Broadcast user count to all connected WebSocket clients
     pub fn broadcastUserCount(self: *Self) void {
         const count = self.getUserCount();
-        std.log.info("User count: {d}", .{count});
+        // std.log.info("User count: {d}", .{count});
 
         // Create JSON message with user count
         var buffer: [100]u8 = undefined;
@@ -100,7 +100,7 @@ pub const WebSocketContext = struct {
 
     pub fn init(allocator: std.mem.Allocator) !*Self {
         const presence_id = generatePresenceId();
-        std.log.info("Creating WebSocket context with presence_id: {d}", .{presence_id});
+        // std.log.info("Creating WebSocket context with presence_id: {d}", .{presence_id});
 
         const ctx = try allocator.create(Self);
         ctx.* = Self{

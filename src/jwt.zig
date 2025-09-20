@@ -1,7 +1,11 @@
 //! Simple session utilities for user authentication only
 const std = @import("std");
 
-const SECRET_KEY = "secret-key-12345";
+const DEFAULT_SECRET_KEY = "secret-key-12345-dev-only";
+
+fn getSecretKey(allocator: std.mem.Allocator) []const u8 {
+    return std.process.getEnvVarOwned(allocator, "SECRET_KEY") catch DEFAULT_SECRET_KEY;
+}
 
 pub const JWTPayload = struct {
     user_id: []const u8,
@@ -32,8 +36,11 @@ pub fn generateJWT(allocator: std.mem.Allocator, _: JWTPayload) ![]u8 {
     }
 
     // Create simple signature: HMAC of session_id
+    const secret_key = getSecretKey(allocator);
+    defer if (secret_key.ptr != DEFAULT_SECRET_KEY.ptr) allocator.free(secret_key);
+
     var signature: [32]u8 = undefined;
-    std.crypto.auth.hmac.sha2.HmacSha256.create(&signature, &session_id, SECRET_KEY);
+    std.crypto.auth.hmac.sha2.HmacSha256.create(&signature, &session_id, secret_key);
 
     // Convert signature to hex
     var signature_hex: [64]u8 = undefined;
@@ -73,8 +80,11 @@ pub fn verifyJWT(allocator: std.mem.Allocator, token: []const u8) !JWTPayload {
     _ = std.fmt.hexToBytes(&signature, signature_hex) catch return error.InvalidToken;
 
     // Verify signature
+    const secret_key = getSecretKey(allocator);
+    defer if (secret_key.ptr != DEFAULT_SECRET_KEY.ptr) allocator.free(secret_key);
+
     var expected_signature: [32]u8 = undefined;
-    std.crypto.auth.hmac.sha2.HmacSha256.create(&expected_signature, session_id, SECRET_KEY);
+    std.crypto.auth.hmac.sha2.HmacSha256.create(&expected_signature, session_id, secret_key);
 
     if (!std.mem.eql(u8, &signature, &expected_signature)) {
         return error.InvalidSignature;

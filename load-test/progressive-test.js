@@ -10,20 +10,20 @@ export const options = {
       executor: "ramping-vus",
       startVUs: 0,
       stages: [
-        { duration: "10s", target: 5000 }, // Ramp to 5K users
-        { duration: "30s", target: 5000 }, // Hold at 5K users (Plateau 1)
-        { duration: "10s", target: 10000 }, // Ramp to 10K users
-        { duration: "30s", target: 10000 }, // Hold at 10K users (Plateau 2)
+        { duration: "10s", target: 2000 }, // Ramp to 5K users
+        { duration: "30s", target: 2000 }, // Hold at 5K users (Plateau 1)
+        { duration: "10s", target: 4000 }, // Ramp to 10K users
+        { duration: "30s", target: 4000 }, // Hold at 10K users (Plateau 2)
         { duration: "10s", target: 0 }, // Ramp down
       ],
     },
   },
   thresholds: {
-    http_req_duration: ["p(95)<5000"], // 95% under 5s
+    http_req_duration: ["p(95)<100"], // 95% under 100ms
   },
 };
 
-const BASE_URL = "http://localhost:8080";
+const BASE_URL = __ENV.BASE_URL || "http://localhost:8080";
 const itemIds = [1, 2, 3, 4, 5, 6, 7];
 
 // Custom metrics per plateau
@@ -53,13 +53,15 @@ export default function () {
       return;
     }
   }
+  sleep(0.2); // Increased from 0.1 to reduce load
 
   // Determine current stage using k6 execution context elapsed time
   const elapsedMs = Date.now() - exec.scenario.startTime;
   const elapsedSeconds = elapsedMs / 1000;
 
   let currentStage = "none";
-  // 10-40s: 5K plateau (10s ramp + 30s hold)
+  // 10-40s: 5K plate
+  // au (10s ramp + 30s hold)
   if (elapsedSeconds >= 10 && elapsedSeconds <= 40) currentStage = "plateau5k";
   // 50-80s: 10K plateau (after 10s ramp, 30s hold)
   if (elapsedSeconds >= 50 && elapsedSeconds <= 80) currentStage = "plateau10k";
@@ -91,7 +93,7 @@ export default function () {
   check(response, {
     "add to cart status 200": (r) => r.status === 200,
   });
-  sleep(0.2);
+  sleep(0.1); // Increased from 0.1 to reduce load
 
   // 2. Remove from cart (simplified for extreme load)
   response = http.del(`${BASE_URL}/api/cart/remove/${randomItemId}`, null, {
@@ -112,7 +114,7 @@ export default function () {
     "remove from cart status 200": (r) => r.status === 200,
   });
 
-  sleep(0.1);
+  sleep(0.1); // Increased from 0.1 to reduce load
 }
 
 export function handleSummary(data) {

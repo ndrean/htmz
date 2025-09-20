@@ -16,8 +16,9 @@ pub const groceries_page_html =
     \\<div class="flex flex-col md:flex-row gap-8 p-4"><div class="md:w-1/2"><h2 class="text-3xl font-bold text-gray-800 mb-6">Grocery Items</h2><div class="space-y-4 max-h-[400px] overflow-y-auto pr-2" hx-get="/api/items" hx-trigger="load" hx-target="this" hx-swap="innerHTML"><p class="text-gray-500">Loading items...</p></div></div><div id="item-details-card" class="md:w-1/2 bg-gray-100 rounded-xl p-6 shadow-lg min-h-[300px] flex items-center justify-center transition-all duration-300" hx-get="/item-details/default" hx-trigger="load" hx-target="this" hx-swap="innerHTML"></div></div>
 ;
 
+//
 pub const shopping_list_page_html =
-    \\<div class="flex flex-col items-center"><div class="flex items-center gap-4 mb-6"><h2 class="text-3xl font-bold text-gray-800">Shopping List</h2><span id="cart-total" class="text-2xl font-semibold text-green-600" hx-get="/cart-total" hx-trigger="load, cartUpdate from:body" hx-target="this" hx-swap="innerHTML">$0.00</span></div><div id="cart-content" class="w-full max-w-xl bg-white rounded-lg p-6 shadow-md max-h-[500px] overflow-y-auto" hx-get="/api/cart" hx-trigger="load" hx-target="this" hx-swap="innerHTML"><p class="text-gray-600 text-center">Your cart is empty.</p></div></div>
+    \\<div class="flex flex-col items-center"><div class="flex items-center gap-4 mb-6"><h2 class="text-3xl font-bold text-gray-800">Shopping List &nbsp</h2><span id="cart-total" class="text-2xl font-semibold text-green-600" hx-get="/cart-total" hx-trigger="load, cartUpdate from:body" hx-target="this" hx-swap="innerHTML">$0.00</span></div><div id="cart-content" class="w-full max-w-xl bg-white rounded-lg p-6 shadow-md max-h-[500px] overflow-y-auto" hx-get="/api/cart" hx-trigger="load" hx-target="this" hx-swap="innerHTML"><p class="text-gray-600 text-center">Your cart is empty.</p></div></div>
 ;
 
 pub const item_details_default_html =

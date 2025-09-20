@@ -59,11 +59,13 @@ pub const CartManager = struct {
         defer self.rwlock.unlock();
 
         try self.ensureUserCartExists(user_id);
-        var cart = self.user_carts.getPtr(user_id).?;
-        if (cart.getPtr(item_id)) |existing_quantity| {
-            existing_quantity.* += 1;
-        } else {
-            try cart.put(item_id, 1);
+        // Don't store the pointer - refetch after potential reallocation
+        if (self.user_carts.getPtr(user_id)) |cart| {
+            if (cart.getPtr(item_id)) |existing_quantity| {
+                existing_quantity.* += 1;
+            } else {
+                try cart.put(item_id, 1);
+            }
         }
     }
 
@@ -201,6 +203,8 @@ pub const CartManager = struct {
 
         // Create new cart for this user_id
         const user_id_copy = try self.allocator.dupe(u8, user_id);
+        errdefer self.allocator.free(user_id_copy); // Clean up on error
+
         const new_cart = std.HashMap(u32, u32, std.hash_map.AutoContext(u32), std.hash_map.default_max_load_percentage).init(self.allocator);
         try self.user_carts.put(user_id_copy, new_cart);
     }

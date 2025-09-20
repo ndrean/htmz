@@ -34,11 +34,61 @@ sequenceDiagram
 	Backend-->>HTMX: returns <div>details</div>
 	HTMX->>DOM: replaces #item-details
 
-	User->>HTMX: Click "Add to cart"
-	HTMX->>Backend: POST /cart
-	Backend-->>HTMX: returns <span>🛒 2 items</span>
-	HTMX->>DOM: replaces #cart
 ```
+
+## HTMX Cart Update Flow
+
+This diagram shows how cart operations trigger real-time updates for both cart count and total:
+
+### Scenario 1: Adding Item from Grocery List
+```mermaid
+sequenceDiagram
+    participant User
+    participant Browser
+    participant Server
+    participant CartTotal as Cart Total Element
+
+    User->>Browser: Clicks "Add to Cart" button
+    Browser->>Server: POST /api/cart/add/42
+    Server->>Server: Add item to user's cart
+    Server-->>Browser: 200 OK + HX-Trigger: updateCartCount, cartUpdate
+    Browser->>Browser: Fires 'updateCartCount' event
+    Browser->>Browser: Fires 'cartUpdate' event
+    Browser->>Server: GET /cart-count (triggered by updateCartCount)
+    Server-->>Browser: "3" (new cart count)
+    Browser->>Browser: Updates cart badge to "3"
+    CartTotal->>Server: GET /cart-total (hx-trigger="cartUpdate from:body")
+    Server-->>CartTotal: "$15.50" (new total)
+    Browser->>Browser: Updates cart total display
+```
+
+### Scenario 2: Changing Quantity in Shopping Cart
+```mermaid
+sequenceDiagram
+    participant User
+    participant Browser
+    participant Server
+    participant CartTotal as Cart Total Element
+
+    User->>Browser: Clicks "+" button on cart item
+    Browser->>Server: POST /api/cart/increase-quantity/42
+    Server->>Server: Increment item quantity
+    Server-->>Browser: 200 OK + "2" + HX-Trigger: updateCartCount, cartUpdate
+    Browser->>Browser: Updates quantity display to "2"
+    Browser->>Browser: Fires 'updateCartCount' event
+    Browser->>Browser: Fires 'cartUpdate' event
+    Browser->>Server: GET /cart-count (triggered by updateCartCount)
+    Server-->>Browser: "4" (new cart count)
+    Browser->>Browser: Updates cart badge to "4"
+    CartTotal->>Server: GET /cart-total (hx-trigger="cartUpdate from:body")
+    Server-->>CartTotal: "$20.50" (new total)
+    Browser->>Browser: Updates cart total display
+```
+
+**Key HTMX Concepts:**
+- `hx-trigger="load, cartUpdate from:body"` - Element listens for events
+- `HX-Trigger: cartUpdate` header - Server tells browser to fire events
+- Reactive updates without JavaScript - Pure declarative HTMX magic! ✨
 
 ## Stress testwith `k6`
 
@@ -307,3 +357,33 @@ pkill -f "htmz"
 lsof -ti:8080 | xargs kill
 kill sell: xxxx
 ```
+
+## Dockerfile using `alpine`  (`musl`)
+
+We target `alpine` so we compile with `linux-musl`.
+
+The `Zig` binary is approx 8Mb and the image is 28Mb.
+
+> [!NOTE]
+> We only copy the executable and the  `libfacil.io.so` from Zig's cache.
+
+- alpine:
+  
+```sh
+pnpm -F htmz make:public && \\
+zig build -Dtarget=aarch64-linux-musl -Doptimize=ReleaseFast && \\
+docker build -t htmz . && \\
+docker run --rm -p 8081:8080 -e SECRET_KEY="1234" htmz
+```
+
+- debian
+  
+```sh
+zig build -Dtarget=aarch64-linux-gnu -Doptimize=ReleaseFast
+```
+
+  scp ./zig-out/bin/htmz user@vps:/opt/htmz/
+  scp .zig-cache/o/*/libfacil.io.so user@vps:/opt/htmz/lib/
+  scp -r public/ user@vps:/opt/htmz/
+
+## 

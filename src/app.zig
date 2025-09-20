@@ -50,6 +50,8 @@ fn getCookieToken(r: zap.Request, ctx: *AppContext) ?[]const u8 {
     defer if (cookie_result) |cookie| ctx.allocator.free(cookie);
 
     if (cookie_result) |cookie| {
+        // Validate cookie length to prevent oversized allocations
+        // if (cookie.len > 1024) return null;
         return ctx.allocator.dupe(u8, cookie) catch null;
     }
 
@@ -401,17 +403,19 @@ pub const CartEndpoint = struct {
 
     fn generateCartHTMLFromDB(self: *CartEndpoint, user_id: []const u8) ![]u8 {
         const cart_items = self.app_context.cart_manager.getCart(self.app_context.allocator, user_id) catch {
-            return try self.app_context.allocator.dupe(u8, "<p class=\"text-gray-600 text-center\">Error loading cart.</p>");
+            const error_msg = "<p class=\"text-gray-600 text-center\">Error loading cart.</p>";
+            return try self.app_context.allocator.dupe(u8, error_msg);
         };
-        defer {
-            for (cart_items) |item| {
-                self.app_context.allocator.free(item.name);
-            }
-            self.app_context.allocator.free(cart_items);
-        }
+        // defer {
+        //     for (cart_items) |item| {
+        //         self.app_context.allocator.free(item.name);
+        //     }
+        //     self.app_context.allocator.free(cart_items);
+        // }
 
         if (cart_items.len == 0) {
-            return try self.app_context.allocator.dupe(u8, "<p class=\"text-gray-600 text-center\">Your cart is empty.</p>");
+            const empty_msg = "<p class=\"text-gray-600 text-center\">Your cart is empty.</p>";
+            return try self.app_context.allocator.dupe(u8, empty_msg);
         }
 
         var cart_html: std.ArrayList(u8) = .empty;
@@ -705,6 +709,8 @@ pub fn main() !void {
         std.log.info("Server started on http://0.0.0.0:8080", .{});
         zap.start(.{ .threads = 2, .workers = 1 });
     }
-    const leaks = gpa.detectLeaks();
-    std.debug.print("Leaks detected?: {}\n", .{leaks});
+    if (builtin.mode != .ReleaseFast and builtin.mode != .ReleaseSmall) {
+        const leaks = gpa.detectLeaks();
+        std.debug.print("Leaks detected?: {}\n", .{leaks});
+    }
 }

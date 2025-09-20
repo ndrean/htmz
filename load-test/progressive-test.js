@@ -12,8 +12,8 @@ export const options = {
       stages: [
         { duration: "10s", target: 2000 }, // Ramp to 5K users
         { duration: "30s", target: 2000 }, // Hold at 5K users (Plateau 1)
-        { duration: "10s", target: 4000 }, // Ramp to 10K users
-        { duration: "30s", target: 4000 }, // Hold at 10K users (Plateau 2)
+        { duration: "30s", target: 8000 }, // Ramp to 10K users
+        { duration: "30s", target: 8000 }, // Hold at 10K users (Plateau 2)
         { duration: "10s", target: 0 }, // Ramp down
       ],
     },
@@ -53,7 +53,7 @@ export default function () {
       return;
     }
   }
-  sleep(0.2); // Increased from 0.1 to reduce load
+  sleep(0.1); // Increased from 0.1 to reduce load
 
   // Determine current stage using k6 execution context elapsed time
   const elapsedMs = Date.now() - exec.scenario.startTime;
@@ -64,7 +64,8 @@ export default function () {
   // au (10s ramp + 30s hold)
   if (elapsedSeconds >= 10 && elapsedSeconds <= 40) currentStage = "plateau5k";
   // 50-80s: 10K plateau (after 10s ramp, 30s hold)
-  if (elapsedSeconds >= 50 && elapsedSeconds <= 80) currentStage = "plateau10k";
+  if (elapsedSeconds >= 70 && elapsedSeconds <= 100)
+    currentStage = "plateau10k";
 
   const randomItemId = itemIds[Math.floor(Math.random() * itemIds.length)];
 
@@ -114,7 +115,7 @@ export default function () {
     "remove from cart status 200": (r) => r.status === 200,
   });
 
-  sleep(0.1); // Increased from 0.1 to reduce load
+  sleep(0.2); // Increased from 0.1 to reduce load
 }
 
 export function handleSummary(data) {
@@ -130,7 +131,7 @@ export function handleSummary(data) {
 
   console.log(`
 === PROGRESSIVE LOAD TEST: PLATEAU PERFORMANCE ===
-📊 PLATEAU 1 (5K VUs - 30s):
+📊 PLATEAU 1 (2K VUs - 30s):
   Requests: ${plateau5kReqs.toLocaleString()}
   Req/s: ${reqs5kPerSec.toFixed(0)}
   Avg Response Time: ${
@@ -140,7 +141,7 @@ export function handleSummary(data) {
     metrics.http_req_duration_5k?.values?.["p(95)"]?.toFixed(2) || "N/A"
   }ms
 
-📊 PLATEAU 2 (10K VUs - 30s):
+📊 PLATEAU 2 (8K VUs - 30s):
   Requests: ${plateau10kReqs.toLocaleString()}
   Req/s: ${reqs10kPerSec.toFixed(0)}
   Avg Response Time: ${

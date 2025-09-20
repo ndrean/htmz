@@ -358,32 +358,81 @@ lsof -ti:8080 | xargs kill
 kill sell: xxxx
 ```
 
-## Dockerfile using `alpine`  (`musl`)
+### Memory Monitoring Commands
 
-We target `alpine` so we compile with `linux-musl`.
+Monitor memory usage during stress testing to detect memory leaks:
 
-The `Zig` binary is approx 8Mb and the image is 28Mb.
-
-> [!NOTE]
-> We only copy the executable and the  `libfacil.io.so` from Zig's cache.
-
-- alpine:
-  
+#### Local Development
 ```sh
-pnpm -F htmz make:public && \\
-zig build -Dtarget=aarch64-linux-musl -Doptimize=ReleaseFast && \\
-docker build -t htmz . && \\
-docker run --rm -p 8081:8080 -e SECRET_KEY="1234" htmz
+# Get process ID and initial memory baseline
+SERVER_PID=$(pgrep -f 'zig-out/bin/htmz')
+ps -o pid,vsz,rss,comm -p $SERVER_PID
+
+# Monitor memory during stress test
+ps -o pid,vsz,rss,comm -p $SERVER_PID && date
+
+# Check for memory leaks on server shutdown (should show "Leaks detected?: false")
+timeout 10s zig build run || echo "Server stopped"
+
+# Run failure stress test to check memory behavior
+cd load-test && k6 run failure-test.js
 ```
 
-- debian
-  
+#### VPS Deployment (Hetzner)
 ```sh
-zig build -Dtarget=aarch64-linux-gnu -Doptimize=ReleaseFast
+# Get process ID and initial memory baseline (adjust path for VPS)
+SERVER_PID=$(pgrep -f '/opt/htmz/htmz')
+ps -o pid,vsz,rss,comm -p $SERVER_PID
+
+# Alternative if pgrep fails - find by process name
+SERVER_PID=$(ps aux | grep '[h]tmz' | grep -v grep | awk '{print $2}')
+ps -o pid,vsz,rss,comm -p $SERVER_PID
+
+# Monitor memory during stress test
+ps -o pid,vsz,rss,comm -p $SERVER_PID && date
+
+# Check memory usage from /proc (more detailed)
+cat /proc/$SERVER_PID/status | grep -E 'VmRSS|VmSize'
 ```
 
-  scp ./zig-out/bin/htmz user@vps:/opt/htmz/
-  scp .zig-cache/o/*/libfacil.io.so user@vps:/opt/htmz/lib/
-  scp -r public/ user@vps:/opt/htmz/
+#### Memory comparison example:
+```
+# Initial: 15,008 KB -> After test: 35,696 KB -> After 2nd test: 35,696 KB (stabilized)
+# This indicates healthy allocator behavior (growth then reuse, not leaks)
+```
 
-## 
+## Deploy (`Hetzner`)
+
+x86 4G machine with Debian and `musl`
+  
+- Produce production code:
+
+```sh
+# copy gzipped static assets into "/public" folder
+pnpm -F htmz make:public && \
+# build with target
+zig build -Dtarget=x86_64-linux-musl -Doptimize=ReleaseFast
+```
+
+- copy local binaries and assets to the VPS
+
+```sh
+scp ./zig-out/bin/htmz root@ipv4-address:opt/htmz/htmz
+
+scp -r public/ root@ipv4-address:opt/htmz/
+
+scp .zig-cache/o/27f03ab08e098dc623c09f5bb4932c03/libfacil.io.so root@91.98.129.192:opt/htmz/lib/libfacil.io.so 
+```
+
+In the VPS:
+
+```sh
+root@debian-4gb-nbg1-1:~ cd opt/htmz && chmod +x htmz
+root@debian-4gb-nbg1-1:~ LD_LIBRARY_PATH=./lib SECRET_KEY=ziggit ./htmz
+```
+
+- hammer the VPS from home:
+
+```sh
+BASE_URL=http://ipv4-address:8080 k6 run load-test/progressive-test.js 
+```

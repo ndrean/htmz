@@ -53,7 +53,9 @@ export default function () {
       return;
     }
   }
-  sleep(0.1); // Increased from 0.1 to reduce load
+  // Realistic user think time (1-5 seconds)
+  // sleep(Math.random() * 4 + 1);
+  sleep(0.2);
 
   // Determine current stage using k6 execution context elapsed time
   const elapsedMs = Date.now() - exec.scenario.startTime;
@@ -69,10 +71,23 @@ export default function () {
 
   const randomItemId = itemIds[Math.floor(Math.random() * itemIds.length)];
 
-  // Headers with current JWT as cookie
+  // Headers with current JWT as cookie + realistic browser headers for CF
   const headers = () => ({
     Cookie: `jwt_token=${jwtCookie}`,
     "Content-Type": "application/json",
+    "User-Agent":
+      "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    Accept:
+      "text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8",
+    "Accept-Language": "en-US,en;q=0.5",
+    "Accept-Encoding": "gzip, deflate, br",
+    DNT: "1",
+    Connection: "keep-alive",
+    "Upgrade-Insecure-Requests": "1",
+    "Sec-Fetch-Dest": "document",
+    "Sec-Fetch-Mode": "navigate",
+    "Sec-Fetch-Site": "none",
+    "Cache-Control": "max-age=0",
   });
 
   // 1. Add item to cart
@@ -94,7 +109,9 @@ export default function () {
   check(response, {
     "add to cart status 200": (r) => r.status === 200,
   });
-  sleep(0.1); // Increased from 0.1 to reduce load
+  // Realistic user interaction delay
+  // sleep(Math.random() * 2 + 0.5);
+  sleep(0.1);
 
   // 2. Remove from cart (simplified for extreme load)
   response = http.del(`${BASE_URL}/api/cart/remove/${randomItemId}`, null, {
@@ -115,7 +132,9 @@ export default function () {
     "remove from cart status 200": (r) => r.status === 200,
   });
 
-  sleep(0.2); // Increased from 0.1 to reduce load
+  // Final user delay before next action
+  // sleep(Math.random() * 3 + 1);
+  sleep(0.1);
 }
 
 export function handleSummary(data) {

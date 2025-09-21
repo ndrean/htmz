@@ -363,6 +363,7 @@ kill sell: xxxx
 Monitor memory usage during stress testing to detect memory leaks:
 
 #### Local Development
+
 ```sh
 # Get process ID and initial memory baseline
 SERVER_PID=$(pgrep -f 'zig-out/bin/htmz')
@@ -379,9 +380,11 @@ cd load-test && k6 run failure-test.js
 ```
 
 #### VPS Deployment (Hetzner)
+
 ```sh
 # Get process ID and initial memory baseline (adjust path for VPS)
-SERVER_PID=$(pgrep -f '/opt/htmz/htmz')
+cd opt/htmz
+SERVER_PID=$(pgrep -f 'htmz')
 ps -o pid,vsz,rss,comm -p $SERVER_PID
 
 # Alternative if pgrep fails - find by process name
@@ -395,8 +398,9 @@ ps -o pid,vsz,rss,comm -p $SERVER_PID && date
 cat /proc/$SERVER_PID/status | grep -E 'VmRSS|VmSize'
 ```
 
-#### Memory comparison example:
-```
+#### Memory comparison example
+
+```txt
 # Initial: 15,008 KB -> After test: 35,696 KB -> After 2nd test: 35,696 KB (stabilized)
 # This indicates healthy allocator behavior (growth then reuse, not leaks)
 ```
@@ -428,6 +432,7 @@ In the VPS:
 
 ```sh
 root@debian-4gb-nbg1-1:~ cd opt/htmz && chmod +x htmz
+
 root@debian-4gb-nbg1-1:~ LD_LIBRARY_PATH=./lib SECRET_KEY=ziggit ./htmz
 ```
 

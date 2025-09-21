@@ -40,6 +40,7 @@ const AppContext = struct {
 // Cart action enum
 const CartAction = enum { add, increase, decrease, remove };
 
+
 // JWT Helper Functions
 fn getCookieToken(r: zap.Request, ctx: *AppContext) ?[]const u8 {
     r.parseCookies(false);
@@ -210,20 +211,34 @@ pub const PagesEndpoint = struct {
         };
 
         // Get grocery item from database
-        const grocery_item_opt = self.app_context.database.getGroceryItem(self.app_context.allocator, item_id) catch {
+        const grocery_item = self.app_context.database.getGroceryItem(self.app_context.allocator, item_id) catch {
             r.setStatus(.internal_server_error);
             return;
-        };
-
-        const grocery_item = grocery_item_opt orelse {
+        } orelse {
             r.setStatus(.not_found);
             return;
         };
         defer self.app_context.allocator.free(grocery_item.name);
+        defer if (grocery_item.svg_data) |svg| self.app_context.allocator.free(svg);
 
-        // Use stack buffer - item details template ~800 bytes max
-        var details_buffer: [1024]u8 = undefined;
-        const item_html = std.fmt.bufPrint(&details_buffer, templates.item_details_template, .{ grocery_item.name, grocery_item.price, item_id }) catch {
+        // Load SVG content if available
+        const svg_html = if (grocery_item.svg_data) |svg_content| blk: {
+            // SVG content is now stored directly in database
+            if (svg_content.len == 0) {
+                break :blk "<svg class=\"w-12 h-12 text-gray-400\" fill=\"none\" stroke=\"currentColor\" viewBox=\"0 0 24 24\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M16 11V7a4 4 0 00-8 0v4M5 9h14l1 12H4L5 9z\"></path></svg>";
+            }
+
+            // SVG files now have CSS classes built-in, just return raw content
+            break :blk svg_content;
+        } else "<svg class=\"w-12 h-12 text-gray-400\" fill=\"none\" stroke=\"currentColor\" viewBox=\"0 0 24 24\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M16 11V7a4 4 0 00-8 0v4M5 9h14l1 12H4L5 9z\"></path></svg>";
+
+        // Use larger buffer for SVG content
+        var details_buffer: [16384]u8 = undefined;
+        const item_html = std.fmt.bufPrint(
+            &details_buffer,
+            templates.item_details_template,
+            .{ grocery_item.name, svg_html, grocery_item.price, item_id },
+        ) catch {
             r.setStatus(.internal_server_error);
             return;
         };
@@ -406,12 +421,12 @@ pub const CartEndpoint = struct {
             const error_msg = "<p class=\"text-gray-600 text-center\">Error loading cart.</p>";
             return try self.app_context.allocator.dupe(u8, error_msg);
         };
-        // defer {
-        //     for (cart_items) |item| {
-        //         self.app_context.allocator.free(item.name);
-        //     }
-        //     self.app_context.allocator.free(cart_items);
-        // }
+        defer {
+            for (cart_items) |item| {
+                self.app_context.allocator.free(item.name);
+            }
+            self.app_context.allocator.free(cart_items);
+        }
 
         if (cart_items.len == 0) {
             const empty_msg = "<p class=\"text-gray-600 text-center\">Your cart is empty.</p>";
@@ -421,10 +436,13 @@ pub const CartEndpoint = struct {
         var cart_html: std.ArrayList(u8) = .empty;
         defer cart_html.deinit(self.app_context.allocator);
 
+        const writer = cart_html.writer(self.app_context.allocator);
         for (cart_items) |item| {
-            const item_html = try std.fmt.allocPrint(self.app_context.allocator, templates.cart_item_template, .{ item.id, item.name, item.price, item.id, item.id, item.id, item.quantity, item.id, item.id, item.id, item.id });
-            defer self.app_context.allocator.free(item_html);
-            try cart_html.appendSlice(self.app_context.allocator, item_html);
+            try std.fmt.format(
+                writer,
+                templates.cart_item_template,
+                .{ item.id, item.name, item.price, item.id, item.id, item.id, item.quantity, item.id, item.id, item.id, item.id },
+            );
         }
 
         return try cart_html.toOwnedSlice(self.app_context.allocator);
@@ -452,6 +470,7 @@ pub const ItemsEndpoint = struct {
         defer {
             for (items) |item| {
                 self.app_context.allocator.free(item.name);
+                // No SVG data to free for list view
             }
             self.app_context.allocator.free(items);
         }
@@ -463,13 +482,13 @@ pub const ItemsEndpoint = struct {
         var items_html: std.ArrayList(u8) = .empty;
         defer items_html.deinit(self.app_context.allocator);
 
+        const writer = items_html.writer(self.app_context.allocator);
         for (items) |item| {
-            const item_html = std.fmt.allocPrint(self.app_context.allocator, templates.grocery_item_template, .{ item.id, item.name, item.price, item.id }) catch {
-                r.setStatus(.internal_server_error);
-                return;
-            };
-            defer self.app_context.allocator.free(item_html);
-            items_html.appendSlice(self.app_context.allocator, item_html) catch {
+            std.fmt.format(
+                writer,
+                templates.grocery_item_template,
+                .{ item.id, item.name, item.price, item.id },
+            ) catch {
                 r.setStatus(.internal_server_error);
                 return;
             };
@@ -690,7 +709,7 @@ pub fn main() !void {
         // HTTP Listener with WebSocket upgrade support
         var listener = zap.HttpListener.init(.{
             .port = 8080,
-            .interface = "0.0.0.0", // Listen on all interfaces for Docker
+            .interface = "0.0.0.0", // Listen on all interfaces
             .on_request = simpleHandler,
             .on_upgrade = on_upgrade, // Add WebSocket upgrade handler
             .log = false,

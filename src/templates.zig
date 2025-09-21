@@ -8,7 +8,7 @@ pub const cart_item_template =
 ;
 
 pub const item_details_template =
-    \\<div class="text-center"><h3 class="text-2xl font-bold text-gray-800 mb-4">{s}</h3><div class="w-24 h-24 bg-gray-200 rounded-full mx-auto mb-4 flex items-center justify-center"><svg class="w-12 h-12 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 11V7a4 4 0 00-8 0v4M5 9h14l1 12H4L5 9z"></path></svg></div><div class="bg-blue-50 rounded-lg p-6 mb-6"><p class="text-3xl font-bold text-blue-600">${d:.2}</p><p class="text-gray-600 mt-2">per unit</p></div><button class="w-full bg-blue-600 text-white py-3 px-6 rounded-lg hover:bg-blue-700 transition-colors font-semibold" hx-post="/api/cart/add/{d}" hx-swap="none">Add to Cart</button></div>
+    \\<div class="text-center"><h3 class="text-2xl font-bold text-gray-800 mb-4">{s}</h3><div class="w-24 h-24 bg-gray-200 rounded-full mx-auto mb-4 flex items-center justify-center">{s}</div><div class="bg-blue-50 rounded-lg p-6 mb-6"><p class="text-3xl font-bold text-blue-600">${d:.2}</p><p class="text-gray-600 mt-2">per unit</p></div><button class="w-full bg-blue-600 text-white py-3 px-6 rounded-lg hover:bg-blue-700 transition-colors font-semibold" hx-post="/api/cart/add/{d}" hx-swap="none">Add to Cart</button></div>
 ;
 
 // HTML response constants

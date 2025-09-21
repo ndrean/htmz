@@ -2,7 +2,6 @@
 const std = @import("std");
 const database = @import("database.zig");
 
-
 pub const CartManager = struct {
     main_db: *database.Database,
     // user_id -> HashMap(item_id -> quantity)
@@ -109,7 +108,6 @@ pub const CartManager = struct {
         self.rwlock.lockShared();
         defer self.rwlock.unlockShared();
 
-
         var cart_items: std.ArrayList(database.CartItem) = .empty;
         defer cart_items.deinit(allocator);
 
@@ -119,13 +117,16 @@ pub const CartManager = struct {
                 const item_id = entry.key_ptr.*;
                 const quantity = entry.value_ptr.*;
 
-
                 // Get item details from database
                 if (self.main_db.getGroceryItem(allocator, item_id)) |grocery_item_opt| {
                     if (grocery_item_opt) |grocery_item| {
                         defer allocator.free(grocery_item.name);
+                        defer if (grocery_item.svg_data) |svg| allocator.free(svg);
 
-                        const item_name = try allocator.dupe(u8, grocery_item.name);
+                        const item_name = try allocator.dupe(
+                            u8,
+                            grocery_item.name,
+                        );
                         try cart_items.append(allocator, database.CartItem{
                             .id = item_id,
                             .name = item_name,
@@ -137,8 +138,7 @@ pub const CartManager = struct {
                     continue;
                 }
             }
-        } else {
-        }
+        } else {}
 
         return try cart_items.toOwnedSlice(allocator);
     }
@@ -146,7 +146,6 @@ pub const CartManager = struct {
     pub fn getCartCount(self: *CartManager, user_id: []const u8) !c_int {
         self.rwlock.lockShared();
         defer self.rwlock.unlockShared();
-
 
         if (self.user_carts.get(user_id)) |cart| {
             var total_count: c_int = 0;
@@ -174,6 +173,7 @@ pub const CartManager = struct {
                 if (self.main_db.getGroceryItem(allocator, item_id)) |grocery_item_opt| {
                     if (grocery_item_opt) |grocery_item| {
                         defer allocator.free(grocery_item.name);
+                        defer if (grocery_item.svg_data) |svg| allocator.free(svg);
                         total += grocery_item.price * @as(f32, @floatFromInt(quantity));
                     }
                 } else |_| {
@@ -208,5 +208,4 @@ pub const CartManager = struct {
         const new_cart = std.HashMap(u32, u32, std.hash_map.AutoContext(u32), std.hash_map.default_max_load_percentage).init(self.allocator);
         try self.user_carts.put(user_id_copy, new_cart);
     }
-
 };

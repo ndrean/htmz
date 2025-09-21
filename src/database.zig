@@ -9,11 +9,21 @@ pub const CartItem = struct {
     price: f32,
 };
 
+// Helper function to read SVG file content
+fn readSVGFile(allocator: std.mem.Allocator, filename: []const u8) ![]const u8 {
+    var path_buffer: [256]u8 = undefined;
+    const svg_path = try std.fmt.bufPrint(&path_buffer, "public/svg/{s}", .{filename});
+
+    return std.fs.cwd().readFileAlloc(allocator, svg_path, 16384) catch |err| {
+        std.debug.print("Failed to read SVG file {s}: {any}\n", .{ svg_path, err });
+        return error.SVGReadError; // Don't allocate on error
+    };
+}
+
 pub const Database = struct {
     db: sqlite.Db,
 
     pub fn init(allocator: std.mem.Allocator, db_path: []const u8) !Database {
-        _ = allocator; // Not needed for memory mode
         _ = db_path; // Not needed for memory mode
 
         // File mode (commented for testing .Memory)
@@ -37,7 +47,7 @@ pub const Database = struct {
         // No PRAGMA statements - testing if they were causing the performance issues
 
         try database.createTables();
-        try database.createItems();
+        try database.createItems(allocator);
         return database;
     }
 
@@ -45,7 +55,7 @@ pub const Database = struct {
         self.db.deinit();
     }
 
-    fn createItems(self: *Database) !void {
+    fn createItems(self: *Database, allocator: std.mem.Allocator) !void {
         const create_items_sql =
             \\CREATE TABLE IF NOT EXISTS items (
             \\    id INTEGER PRIMARY KEY,
@@ -72,20 +82,32 @@ pub const Database = struct {
 
         if (count) |c| {
             if (c == 0) {
-                const insert_sql =
-                    \\INSERT INTO items (name, price) VALUES
-                    \\('Apple', 0.50),
-                    \\('Bananas', 0.30),
-                    \\('Bread', 2.00),
-                    \\('Cheese', 3.00),
-                    \\('Chicken', 5.00),
-                    \\('Fish', 7.00),
-                    \\('Grapes', 2.50),
-                    \\('Carrot', 0.20),
-                    \\('Doughnut', 1.00),
-                    \\('Eggs (dozen)', 2.50);
-                ;
-                try self.db.exec(insert_sql, .{}, .{});
+                // Read SVG files and insert with actual content
+                const items = [_]struct { name: []const u8, price: f32, svg_file: []const u8 }{
+                    .{ .name = "Apple", .price = 0.50, .svg_file = "apple-svgrepo-com.svg" },
+                    .{ .name = "Bananas", .price = 0.30, .svg_file = "banana-svgrepo-com.svg" },
+                    .{ .name = "Bread", .price = 2.00, .svg_file = "bread-svgrepo-com.svg" },
+                    .{ .name = "Cheese", .price = 3.00, .svg_file = "cheese-svgrepo-com.svg" },
+                    .{ .name = "Chicken", .price = 5.00, .svg_file = "chicken-svgrepo-com.svg" },
+                    .{ .name = "Fish", .price = 7.00, .svg_file = "fish-svgrepo-com.svg" },
+                    .{ .name = "Grapes", .price = 2.50, .svg_file = "grapes-svgrepo-com.svg" },
+                    .{ .name = "Carrot", .price = 0.20, .svg_file = "carrot-svgrepo-com.svg" },
+                    .{ .name = "Doughnut", .price = 1.00, .svg_file = "doughnut-svgrepo-com.svg" },
+                    .{ .name = "Eggs (dozen)", .price = 2.50, .svg_file = "eggs-svgrepo-com.svg" },
+                };
+
+                for (items) |item| {
+                    const svg_content = readSVGFile(allocator, item.svg_file) catch {
+                        continue;
+                    };
+                    defer allocator.free(svg_content);
+
+
+                    var stmt = try self.db.prepare("INSERT INTO items (name, price, image) VALUES (?, ?, ?)");
+                    defer stmt.deinit();
+
+                    try stmt.exec(.{}, .{ .name = item.name, .price = item.price, .image = svg_content });
+                }
             }
         }
     }
@@ -99,10 +121,11 @@ pub const Database = struct {
         id: u32,
         name: []const u8,
         price: f32,
+        svg_data: ?[]const u8,
     };
 
     pub fn getGroceryItem(self: *Database, allocator: std.mem.Allocator, item_id: u32) !?GroceryItem {
-        const sql = "SELECT id, name, price FROM items WHERE id = ?";
+        const sql = "SELECT id, name, price, image FROM items WHERE id = ?";
         var stmt = try self.db.prepare(sql);
         defer stmt.deinit();
 
@@ -110,14 +133,23 @@ pub const Database = struct {
             id: c_int,
             name: [256:0]u8,
             price: f64,
+            image: ?[16384:0]u8,
         }, .{ .id = item_id });
 
         if (try iter.next(.{})) |row| {
-            const name = try allocator.dupe(u8, std.mem.sliceTo(&row.name, 0));
+            const name = try allocator.dupe(
+                u8,
+                std.mem.sliceTo(&row.name, 0),
+            );
+            const svg_data = if (row.image) |img| try allocator.dupe(
+                u8,
+                std.mem.sliceTo(&img, 0),
+            ) else null;
             return GroceryItem{
                 .id = @intCast(row.id),
                 .name = name,
                 .price = @floatCast(row.price),
+                .svg_data = svg_data,
             };
         }
         return null;
@@ -137,13 +169,24 @@ pub const Database = struct {
         var items: std.ArrayList(GroceryItem) = .empty;
         defer items.deinit(allocator);
 
+        var count: u32 = 0;
         while (try iter.next(.{})) |row| {
-            const name = try allocator.dupe(u8, std.mem.sliceTo(&row.name, 0));
-            try items.append(allocator, GroceryItem{
-                .id = @intCast(row.id),
-                .name = name,
-                .price = @floatCast(row.price),
-            });
+            count += 1;
+
+            const name = try allocator.dupe(
+                u8,
+                std.mem.sliceTo(&row.name, 0),
+            );
+
+            try items.append(
+                allocator,
+                GroceryItem{
+                    .id = @intCast(row.id),
+                    .name = name,
+                    .price = @floatCast(row.price),
+                    .svg_data = null, // No SVG data for list view
+                },
+            );
         }
 
         return try items.toOwnedSlice(allocator);

@@ -1,46 +1,11 @@
 # HTMZ
 
-## Interaction diagram
-
-```mermaid
-sequenceDiagram
-	participant User
-	participant HTMX
-	participant Backend
-	participant DOM
-
-	User->>HTMX: Click "TODOs"
-	HTMX->>Backend: GET /todos
-	Backend-->>HTMX: returns <div>...</div>
-	HTMX->>DOM: replaces #content
-
-	User->>HTMX: Click "Shop"
-	HTMX->>Backend: GET /shop
-	Backend-->>HTMX: returns <div>...</div>
-	HTMX->>DOM: replaces #content
-
-	User->>HTMX: Type task + Submit
-	HTMX->>Backend: POST /todos
-	Backend-->>HTMX: returns <li>Task...</li>
-	HTMX->>DOM: appended to #todo-list
-
-	User->>HTMX: Click ✖ on task
-	HTMX->>Backend: DELETE /todos/ID
-	Backend-->>HTMX: returns "" (empty)
-	HTMX->>DOM: removes <li> via outerHTML
-
-	User->>HTMX: Click "Apples"
-	HTMX->>Backend: GET /shop/items/42
-	Backend-->>HTMX: returns <div>details</div>
-	HTMX->>DOM: replaces #item-details
-
-```
-
 ## HTMX Cart Update Flow
 
 This diagram shows how cart operations trigger real-time updates for both cart count and total:
 
 ### Scenario 1: Adding Item from Grocery List
+
 ```mermaid
 sequenceDiagram
     participant User
@@ -63,6 +28,7 @@ sequenceDiagram
 ```
 
 ### Scenario 2: Changing Quantity in Shopping Cart
+
 ```mermaid
 sequenceDiagram
     participant User
@@ -86,9 +52,9 @@ sequenceDiagram
 ```
 
 **Key HTMX Concepts:**
+
 - `hx-trigger="load, cartUpdate from:body"` - Element listens for events
 - `HX-Trigger: cartUpdate` header - Server tells browser to fire events
-- Reactive updates without JavaScript - Pure declarative HTMX magic! ✨
 
 ## Stress testwith `k6`
 

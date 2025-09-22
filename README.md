@@ -225,6 +225,49 @@ root@debian-4gb-nbg1-1:~ LD_LIBRARY_PATH=./lib SECRET_KEY=ziggit ./htmz
 BASE_URL=http://ipv4-address:8080 k6 run load-test/progressive-test.js 
 ```
 
+### Daemonize - Create service
+
+```sh
+root@debian-4gb-nbg1-1:~ sudo tee /etc/systemd/system/htmz.service > /dev/null << 'EOF'
+[Unit]
+  Description=HTMZ Web Server
+  After=network.target
+
+[Service]
+  Type=simple
+  User=root
+  WorkingDirectory=/root/opt/htmz
+  Environment=LD_LIBRARY_PATH=/root/opt/htmz/lib
+  Environment=SECRET_KEY=ziggit
+  ExecStart=/root/opt/htmz/htmz
+  Restart=always
+
+[Install]
+  WantedBy=multi-user.target
+  EOF
+```
+
+```sh
+root@debian-4gb-nbg1-1:~ sudo systemctl daemon-reload
+# auto-start on boot
+root@debian-4gb-nbg1-1:~ sudo systemctl enable htmz
+
+root@debian-4gb-nbg1-1:~ sudo systemctl start htmz
+root@debian-4gb-nbg1-1:~ sudo systemctl status htmz
+
+root@debian-4gb-nbg1-1:~ sudo systemctl stop htmz
+root@debian-4gb-nbg1-1:~ sudo systemctl restart htmz
+```
+
+Logs:
+
+```sh
+sudo journalctl -u htmz -f   # Live logs
+sudo journalctl -u htmz      # All logs
+```
+
+Check if the server is running: <https://htmz.online>
+
 ## Notes
 
 - grab a cookie for testing:

@@ -6,7 +6,6 @@ src/html/node_modules
 .vscode
 old-files/
 htmz.sql3
-/docs
 CLAUDE.md
 .claude/
 public/

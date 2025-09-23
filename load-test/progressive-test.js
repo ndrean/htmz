@@ -12,8 +12,8 @@ export const options = {
       stages: [
         { duration: "10s", target: 5000 }, // Ramp to 5K users
         { duration: "30s", target: 5000 }, // Hold at 5K users (Plateau 1)
-        { duration: "30s", target: 8000 }, // Ramp to 10K users
-        { duration: "30s", target: 8000 }, // Hold at 10K users (Plateau 2)
+        { duration: "30s", target: 10000 }, // Ramp to 10K users
+        { duration: "30s", target: 10000 }, // Hold at 10K users (Plateau 2)
         { duration: "10s", target: 0 }, // Ramp down
       ],
     },
@@ -160,7 +160,7 @@ export function handleSummary(data) {
     metrics.http_req_duration_5k?.values?.["p(95)"]?.toFixed(2) || "N/A"
   }ms
 
-📊 PLATEAU 2 (8K VUs - 30s):
+📊 PLATEAU 2 (10K VUs - 30s):
   Requests: ${plateau10kReqs.toLocaleString()}
   Req/s: ${reqs10kPerSec.toFixed(0)}
   Avg Response Time: ${

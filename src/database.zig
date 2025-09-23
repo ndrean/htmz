@@ -2,6 +2,75 @@
 const std = @import("std");
 const sqlite = @import("sqlite");
 
+// Connection Pool for concurrent SQLite access
+const ConnectionPool = struct {
+    connections: []sqlite.Db,
+    available: []bool,
+    mutex: std.Thread.Mutex,
+    allocator: std.mem.Allocator,
+
+    pub fn init(allocator: std.mem.Allocator, pool_size: usize, db_path: []const u8) !ConnectionPool {
+        const connections = try allocator.alloc(sqlite.Db, pool_size);
+        const available = try allocator.alloc(bool, pool_size);
+
+        // All connections share the same database file
+        for (connections, 0..) |*conn, i| {
+            const db_path_z = try allocator.dupeZ(u8, db_path);
+            defer allocator.free(db_path_z);
+
+            conn.* = try sqlite.Db.init(.{
+                .mode = .{ .File = db_path_z },
+                .open_flags = .{
+                    .write = true,
+                    .create = true,
+                },
+                .threading_mode = .MultiThread,
+            });
+            available[i] = true;
+        }
+
+        return ConnectionPool{
+            .connections = connections,
+            .available = available,
+            .mutex = std.Thread.Mutex{},
+            .allocator = allocator,
+        };
+    }
+
+    pub fn deinit(self: *ConnectionPool) void {
+        for (self.connections) |*conn| {
+            conn.deinit();
+        }
+        self.allocator.free(self.connections);
+        self.allocator.free(self.available);
+    }
+
+    pub fn acquire(self: *ConnectionPool) ?*sqlite.Db {
+        self.mutex.lock();
+        defer self.mutex.unlock();
+
+        for (self.connections, 0..) |*conn, i| {
+            if (self.available[i]) {
+                self.available[i] = false;
+                return conn;
+            }
+        }
+        return null; // No connections available
+    }
+
+    pub fn release(self: *ConnectionPool, conn: *sqlite.Db) void {
+        self.mutex.lock();
+        defer self.mutex.unlock();
+
+        for (self.connections, 0..) |*pool_conn, i| {
+            if (pool_conn == conn) {
+                self.available[i] = true;
+                return;
+            }
+        }
+    }
+};
+
 pub const CartItem = struct {
     id: u32,
     name: []const u8,
@@ -15,47 +84,48 @@ fn readSVGFile(allocator: std.mem.Allocator, filename: []const u8) ![]const u8 {
     const svg_path = try std.fmt.bufPrint(&path_buffer, "public/svg/{s}", .{filename});
 
     return std.fs.cwd().readFileAlloc(allocator, svg_path, 16384) catch |err| {
-        std.debug.print("Failed to read SVG file {s}: {any}\n", .{ svg_path, err });
+        std.log.err("Failed to read SVG file {s}: {any}\n", .{ svg_path, err });
         return error.SVGReadError; // Don't allocate on error
     };
 }
 
 pub const Database = struct {
-    db: sqlite.Db,
-    mutex: std.Thread.Mutex,
+    db: sqlite.Db, // Keep one for initialization
+    pool: ConnectionPool,
 
-    pub fn init(allocator: std.mem.Allocator, db_path: []const u8) !Database {
-        _ = db_path; // Not needed for memory mode
+    pub fn init(allocator: std.mem.Allocator, db_path: []const u8, pool_size: usize) !Database {
+        // Use file mode for shared access across connections
+        // Sqlite expects a zero terminated string for file paths
+        const db_path_z = try allocator.dupeZ(u8, db_path);
+        defer allocator.free(db_path_z);
 
-        // File mode (commented for testing .Memory)
-        // const db_path_z = try allocator.dupeZ(u8, db_path);
-        // defer allocator.free(db_path_z);
-        // const db = try sqlite.Db.init(.{
-        //     .mode = .{ .File = db_path_z },
-
-        // Memory mode
         const db = try sqlite.Db.init(.{
-            .mode = .Memory,
+            .mode = .{ .File = db_path_z },
             .open_flags = .{
                 .write = true,
                 .create = true,
             },
             .threading_mode = .MultiThread,
+            // .threading_mode = .Serialized
+
         });
 
         var database = Database{
             .db = db,
-            .mutex = std.Thread.Mutex{},
+            .pool = undefined, // Will be set after template is populated
         };
 
-        // No PRAGMA statements - testing if they were causing the performance issues
-
+        // Initialize and populate the template database first
         try database.createTables();
         try database.createItems(allocator);
+
+        // Create connection pool (8 connections for 8 workers) sharing the same file
+        database.pool = try ConnectionPool.init(allocator, pool_size, db_path);
         return database;
     }
 
     pub fn deinit(self: *Database) void {
+        self.pool.deinit();
         self.db.deinit();
     }
 
@@ -107,7 +177,6 @@ pub const Database = struct {
                     };
                     defer allocator.free(svg_content);
 
-
                     var stmt = try self.db.prepare("INSERT INTO items (name, price, image) VALUES (?, ?, ?)");
                     defer stmt.deinit();
 
@@ -130,11 +199,12 @@ pub const Database = struct {
     };
 
     pub fn getGroceryItem(self: *Database, allocator: std.mem.Allocator, item_id: u32) !?GroceryItem {
-        self.mutex.lock();
-        defer self.mutex.unlock();
+        const conn = self.pool.acquire() orelse return error.NoConnectionAvailable;
+        defer self.pool.release(conn);
+        // const conn = &self.db; // For single connection (no pool)
 
         const sql = "SELECT id, name, price, image FROM items WHERE id = ?";
-        var stmt = try self.db.prepare(sql);
+        var stmt = try conn.prepare(sql);
         defer stmt.deinit();
 
         var iter = try stmt.iterator(struct {
@@ -164,11 +234,12 @@ pub const Database = struct {
     }
 
     pub fn getAllGroceryItems(self: *Database, allocator: std.mem.Allocator) ![]GroceryItem {
-        self.mutex.lock();
-        defer self.mutex.unlock();
+        const conn = self.pool.acquire() orelse return error.NoConnectionAvailable;
+        defer self.pool.release(conn);
+        // const conn = &self.db; // For single connection (no pool)
 
         const sql = "SELECT id, name, price FROM items ORDER BY id";
-        var stmt = try self.db.prepare(sql);
+        var stmt = try conn.prepare(sql);
         defer stmt.deinit();
 
         var iter = try stmt.iterator(struct {

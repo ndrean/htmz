@@ -30,7 +30,7 @@ const AppContext = struct {
         // Heap allocation needed because cart_manager needs mutable reference to database
         const db = try allocator.create(database.Database);
         // used .Memory for simplicity, so path is userless in fact
-        db.* = try database.Database.init(allocator, "htmz.sql3");
+        db.* = try database.Database.init(allocator, "htmz.sql3", 2);
 
         const cm = try allocator.create(cart_manager.CartManager);
         cm.* = try cart_manager.CartManager.init(allocator, db);
@@ -715,7 +715,7 @@ pub fn main() !void {
             .backlog = 2000,
         },
         .workers = .{
-            .count = 1,
+            .count = 2,
             .large_buffer_count = 32,
             .large_buffer_size = 131072,
         },

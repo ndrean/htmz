@@ -709,15 +709,16 @@ pub fn main() !void {
 
     const config = httpz.Config{
         .port = 8880,
+        .address = "0.0.0.0",
         .thread_pool = .{
-            .count = 64,
-            .buffer_size = 131072,
-            .backlog = 2000,
+            .count = 32,
+            .buffer_size = 131_072,
+            .backlog = 2_000,
         },
         .workers = .{
             .count = 2,
             .large_buffer_count = 32,
-            .large_buffer_size = 131072,
+            .large_buffer_size = 131_072,
         },
 
         // .request = .{

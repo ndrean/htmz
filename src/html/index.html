@@ -18,7 +18,7 @@
     <header class="mb-8 text-center">
       <h1 class="text-5xl font-extrabold text-blue-600">My Shopping Cart</h1>
       <p class="text-md text-gray-500 mt-1">
-        SSR with <code>Zig</code> with <code>Zap</code> and
+        SSR with <code>Zig</code> with <code>http.zig</code> and
         <code>zig-sqlite</code>
       </p>
       <p class="text-md text-gray-500 mt-2">
@@ -47,7 +47,7 @@
         class="flex justify-center mb-8 bg-gray-100 rounded-lg p-3 shadow-inner"
       >
         <a
-          class="px-6 py-3 font-semibold text-blue-600 rounded-lg transition-colors duration-200 hover:bg-blue-100 mr-4"
+          class="px-6 py-3 font-semibold text-blue-600 rounded-lg transition-colors duration-200 hover:bg-blue-100 mr-4 cursor-pointer"
           hx-get="/groceries"
           hx-target="#content"
           hx-push-url="true"
@@ -55,7 +55,7 @@
           >Grocery List</a
         >
         <a
-          class="px-6 py-3 font-semibold text-blue-600 rounded-lg transition-colors duration-200 hover:bg-blue-100"
+          class="px-6 py-3 font-semibold text-blue-600 rounded-lg transition-colors duration-200 hover:bg-blue-100 cursor-pointer"
           hx-get="/shopping-list"
           hx-target="#content"
           hx-push-url="true"

@@ -228,9 +228,12 @@ BASE_URL=http://ipv4-address:8080 k6 run load-test/progressive-test.js
 ### Daemonize - Create service
 
 ```sh
-root@debian-4gb-nbg1-1:~ sudo tee /etc/systemd/system/htmz.service > /dev/null << 'EOF'
+root@debian-4gb-nbg1-1:~ 
+
+
+sudo tee /etc/systemd/system/htmz-httpz.service > /dev/null << 'EOF'
 [Unit]
-  Description=HTMZ Web Server
+  Description=HTMZ Web Server (httpz implementation)
   After=network.target
 
 [Service]
@@ -239,12 +242,38 @@ root@debian-4gb-nbg1-1:~ sudo tee /etc/systemd/system/htmz.service > /dev/null <
   WorkingDirectory=/root/opt/htmz
   Environment=LD_LIBRARY_PATH=/root/opt/htmz/lib
   Environment=SECRET_KEY=ziggit
-  ExecStart=/root/opt/htmz/htmz
+  ExecStart=/root/opt/htmz/htmz-httpz
   Restart=always
+  # Set file descriptor limits
+  LimitNOFILE=65536
+  LimitNPROC=65536
 
 [Install]
   WantedBy=multi-user.target
-  EOF
+EOF
+```
+
+```sh
+sudo tee /etc/systemd/system/htmz-zap.service > /dev/null << 'EOF'
+[Unit]
+  Description=HTMZ Web Server (Zap implementation)
+  After=network.target
+
+[Service]
+  Type=simple
+  User=root
+  WorkingDirectory=/root/opt/htmz
+  Environment=LD_LIBRARY_PATH=/root/opt/htmz/lib
+  Environment=SECRET_KEY=ziggit
+  ExecStart=/root/opt/htmz/htmz-zap
+  Restart=always
+  # Set file descriptor limits
+  LimitNOFILE=65536
+  LimitNPROC=65536
+
+[Install]
+  WantedBy=multi-user.target
+EOF
 ```
 
 ```sh
@@ -279,6 +308,7 @@ curl -v -c cookies.txt http://localhost:8080/
 - pass the cookie for testing:
 
 ```sh
+curl -v -c cookies.txt http://91.98.129.192:8080
 curl -v -H "Cookie: jwt_token=test" http://localhost:8080/api/items
 ```
 
@@ -287,5 +317,52 @@ curl -v -H "Cookie: jwt_token=test" http://localhost:8080/api/items
 ```sh
 pkill -f "htmz"
 
-lsof -ti:8080 | xargs kill
+pgrep -f htmz
+# <pid> 
+lsof -it:8880 | xargs kill <pid>
+```
+
+## Results
+
+- httpz local
+
+```txt
+📊 PLATEAU 1 (2K VUs - 30s):
+  Requests: 159094
+  Req/s: 5303
+  Avg Response Time: 26.84ms
+  95th Percentile: 30.55ms
+
+📊 PLATEAU 2 (6K VUs - 30s):
+  Requests: 473560
+  Req/s: 15785
+  Avg Response Time: 29.00ms
+  95th Percentile: 36.36ms
+
+=== OVERALL RESULTS ===
+Peak VUs: 6000
+Total Requests: 1722822
+Failed Requests: 0.00%
+```
+
+- httpz on VPS
+  
+```txt
+=== PROGRESSIVE LOAD TEST: PLATEAU PERFORMANCE ===
+📊 PLATEAU 1 (2K VUs - 30s):
+  Requests: 262914
+  Req/s: 8764
+  Avg Response Time: 27.67ms
+  95th Percentile: 32.66ms
+
+📊 PLATEAU 2 (6K VUs - 30s):
+  Requests: 760496
+  Req/s: 25350
+  Avg Response Time: 33.93ms
+  95th Percentile: 49.41ms
+
+=== OVERALL RESULTS ===
+Peak VUs: 6000
+Total Requests: 1722822
+Failed Requests: 0.00%
 ```

@@ -72,14 +72,14 @@ pub const WSClient = struct {
 
         // Increment presence count
         const new_count = presence_count.fetchAdd(1, .monotonic) + 1;
-        std.log.info("WebSocket connection established for user: {s} (total: {d})", .{ self.user_id, new_count });
+        // std.log.info("WebSocket connection established for user: {s} (total: {d})", .{ self.user_id, new_count });
 
         // Broadcast new count to all clients
         try broadcastPresenceCount(new_count);
     }
 
-    pub fn clientMessage(self: *@This(), message: []const u8) !void {
-        std.log.info("Received message from {s}: {s}", .{ self.user_id, message });
+    pub fn clientMessage(_: *@This(), _: []const u8) !void {
+        // std.log.info("Received message from {s}: {s}", .{ self.user_id, message });
         // Echo back for testing - in real implementation you'd send back via the connection
     }
 
@@ -100,7 +100,7 @@ pub const WSClient = struct {
 
         // Decrement presence count
         const new_count = presence_count.fetchSub(1, .monotonic) - 1;
-        std.log.info("WebSocket connection closed for user: {s} (total: {d})", .{ self.user_id, new_count });
+        // std.log.info("WebSocket connection closed for user: {s} (total: {d})", .{ self.user_id, new_count });
 
         // Broadcast new count to remaining clients
         broadcastPresenceCount(new_count) catch |err| {
@@ -108,9 +108,9 @@ pub const WSClient = struct {
         };
     }
 
-    pub fn deinit(self: *@This()) void {
+    pub fn deinit(_: *@This()) void {
         // Cleanup if needed - clientClose should handle most disconnect logic
-        std.log.debug("Deinit called for user: {s}", .{self.user_id});
+        // std.log.debug("Deinit called for user: {s}", .{self.user_id});
     }
 };
 

@@ -1,13 +1,26 @@
 const std = @import("std");
 const builtin = @import("builtin");
-const zap = @import("zap");
+const httpz = @import("httpz");
 const jwt = @import("jwt.zig");
 const database = @import("database.zig");
 const cart_manager = @import("cart_manager.zig");
 const templates = @import("templates.zig");
-const ws = @import("ws.zig");
+const ws_httpz = @import("ws_httpz.zig");
+
+// Embed static files at compile time for better performance
+const static_html = @embedFile("html/index.html.gz");
+const static_css = @embedFile("html/index.css.gz");
+const static_htmx = @embedFile("html/htmx.min.js.gz");
+const static_ws = @embedFile("html/ws.min.js.gz");
 
 /// Application Context. Owns database and cart manager
+// Handler struct for httpz server with WebSocket support
+const Handler = struct {
+    app: *AppContext,
+
+    pub const WebsocketHandler = ws_httpz.WSClient;
+};
+
 const AppContext = struct {
     allocator: std.mem.Allocator,
     database: *database.Database,
@@ -40,30 +53,20 @@ const AppContext = struct {
 // Cart action enum
 const CartAction = enum { add, increase, decrease, remove };
 
-
-// JWT Helper Functions
-fn getCookieToken(r: zap.Request, ctx: *AppContext) ?[]const u8 {
-    r.parseCookies(false);
-
-    const cookie_result = r.getCookieStr(ctx.allocator, "jwt_token") catch {
-        return null;
-    };
-    defer if (cookie_result) |cookie| ctx.allocator.free(cookie);
-
-    if (cookie_result) |cookie| {
-        // Validate cookie length to prevent oversized allocations
-        // if (cookie.len > 1024) return null;
-        return ctx.allocator.dupe(u8, cookie) catch null;
+// JWT Helper Functions for httpz
+fn getCookieToken(req: *httpz.Request, allocator: std.mem.Allocator) ?[]const u8 {
+    var cookies = req.cookies();
+    if (cookies.get("jwt_token")) |token| {
+        return allocator.dupe(u8, token) catch null;
     }
-
     return null;
 }
 
 // JWT validation - returns payload if valid, null if invalid/missing
-fn validateJWT(r: zap.Request, ctx: *AppContext) ?jwt.JWTPayload {
-    if (getCookieToken(r, ctx)) |token| {
-        defer ctx.allocator.free(token);
-        if (jwt.verifyJWT(ctx.allocator, token)) |payload| {
+fn validateJWT(req: *httpz.Request, allocator: std.mem.Allocator) ?jwt.JWTPayload {
+    if (getCookieToken(req, allocator)) |token| {
+        defer allocator.free(token);
+        if (jwt.verifyJWT(allocator, token)) |payload| {
             return payload;
         } else |_| {
             // JWT verification failed
@@ -73,610 +76,608 @@ fn validateJWT(r: zap.Request, ctx: *AppContext) ?jwt.JWTPayload {
     return null; // No JWT cookie found
 }
 
-// JWT validation for protected routes - returns payload or sends redirect
-fn validateJWTOrRedirect(r: zap.Request, ctx: *AppContext) ?jwt.JWTPayload {
-    if (validateJWT(r, ctx)) |payload| {
-        return payload;
-    } else {
-        // Invalid/missing JWT - redirect to home page
-        r.setStatus(.found); // 302 redirect
-        r.setHeader("Location", "/") catch {};
-        return null;
-    }
-}
-
-// Create new JWT - ONLY used in sendFullPage for GET /
-fn createNewJWTUser(ctx: *AppContext) !jwt.JWTPayload {
+// Create new JWT for new users
+fn createNewJWTUser(allocator: std.mem.Allocator) !jwt.JWTPayload {
     const user_id = try std.fmt.allocPrint(
-        ctx.allocator,
+        allocator,
         "user_{d}_{d}",
         .{ std.time.timestamp(), std.crypto.random.int(u32) },
     );
 
     return jwt.JWTPayload{
         .user_id = user_id,
-        .exp = std.time.timestamp() + 3600, // 1 hour expiry
+        .exp = std.time.timestamp() + 3600, // 1 hour from now
     };
 }
 
-// ===== ENDPOINTS =====
-// Each endpoint receives AppContext for DB and Cart access
-// Each request gets its own endpoint instance and
-// memory allocation and resource management is contained per request
+pub fn indexHandler(_: Handler, req: *httpz.Request, res: *httpz.Response) !void {
+    // Check if user has valid JWT, create one if not
+    if (validateJWT(req, res.arena)) |payload| {
+        defer jwt.deinitPayload(res.arena, payload);
+        // User already has valid session - just serve the page
+    } else {
+        // No valid JWT - create new session
+        const payload = createNewJWTUser(res.arena) catch {
+            res.status = 500;
+            res.body = "500 - Internal Server Error";
+            try res.write();
+            return;
+        };
+        defer jwt.deinitPayload(res.arena, payload);
 
-/// Home Endpoint - handles homepage and JWT creation
-pub const HomeEndpoint = struct {
-    app_context: *AppContext,
-    path: []const u8 = "/",
-    error_strategy: zap.Endpoint.ErrorStrategy = .log_to_response,
+        const token = jwt.generateJWT(res.arena, payload) catch {
+            res.status = 500;
+            res.body = "500 - Internal Server Error";
+            try res.write();
+            return;
+        };
 
-    pub fn init(ctx: *AppContext) HomeEndpoint {
-        return HomeEndpoint{ .app_context = ctx };
+        // Set JWT in cookie
+        try res.setCookie("jwt_token", token, .{
+            .http_only = true,
+            .path = "/",
+            .same_site = .lax,
+            .max_age = 3600,
+        });
     }
 
-    pub fn get(self: *HomeEndpoint, r: zap.Request) !void {
-        // Only create/set JWT if user doesn't have valid one
-        if (validateJWT(r, self.app_context)) |payload| {
-            defer jwt.deinitPayload(self.app_context.allocator, payload);
-            // User already has valid session - just serve the page
-        } else {
-            // No valid JWT - create new session
-            const payload = createNewJWTUser(self.app_context) catch {
-                r.setStatus(.internal_server_error);
-                return;
-            };
-            defer jwt.deinitPayload(self.app_context.allocator, payload);
+    res.status = 200;
+    res.content_type = httpz.ContentType.HTML;
+    res.headers.add("content-encoding", "gzip");
+    res.body = static_html;
+    try res.write();
+}
 
-            const token = jwt.generateJWT(self.app_context.allocator, payload) catch {
-                r.setStatus(.internal_server_error);
-                return;
-            };
-            defer self.app_context.allocator.free(token);
+pub fn cssHandler(_: Handler, _: *httpz.Request, res: *httpz.Response) !void {
+    res.status = 200;
+    res.content_type = httpz.ContentType.CSS;
+    res.headers.add("content-encoding", "gzip");
+    res.body = static_css;
+    try res.write();
+}
 
-            // Set JWT in cookie only (headers are useless for HTMX)
-            r.setCookie(.{
-                .http_only = true,
-                .path = "/",
-                .name = "jwt_token",
-                .value = token,
-                .same_site = .Lax,
-                .max_age_s = 3600,
-                .secure = false, // Allow over HTTP for testing
-            }) catch {};
-        }
+pub fn htmxHandler(_: Handler, _: *httpz.Request, res: *httpz.Response) !void {
+    res.status = 200;
+    res.content_type = httpz.ContentType.JS;
+    res.headers.add("content-encoding", "gzip");
+    res.body = static_htmx;
+    try res.write();
+}
 
-        r.setStatus(.ok);
-        r.setContentType(.HTML) catch return;
-        // Use sendFile: facil.io sends gz if exists
-        r.sendFile("public/index.html") catch return;
-    }
-};
+pub fn wsHandler(_: Handler, _: *httpz.Request, res: *httpz.Response) !void {
+    res.status = 200;
+    res.content_type = httpz.ContentType.JS;
+    res.headers.add("content-encoding", "gzip");
+    res.body = static_ws;
+    try res.write();
+}
 
-/// Public Pages Endpoint - handles template pages and item details
-pub const PagesEndpoint = struct {
-    app_context: *AppContext,
-    path: []const u8 = "/groceries",
-    error_strategy: zap.Endpoint.ErrorStrategy = .log_to_response,
+pub fn svgHandler(handler: Handler, req: *httpz.Request, res: *httpz.Response) !void {
+    const filename = req.params.get("filename") orelse {
+        res.status = 404;
+        res.body = "404 - SVG Not Found";
+        return;
+    };
 
-    pub fn init(ctx: *AppContext) PagesEndpoint {
-        return PagesEndpoint{ .app_context = ctx };
-    }
+    var path_buffer: [512]u8 = undefined;
+    const svg_path = std.fmt.bufPrint(&path_buffer, "public/svg/{s}", .{filename}) catch {
+        res.status = 404;
+        res.body = "404 - SVG Path Error";
+        return;
+    };
 
-    pub fn get(self: *PagesEndpoint, r: zap.Request) !void {
-        const path = r.path orelse {
-            r.setStatus(.bad_request);
-            return;
-        };
+    const svg_content = std.fs.cwd().readFileAlloc(handler.app.allocator, svg_path, 64 * 1024) catch {
+        res.status = 404;
+        res.body = "404 - SVG File Not Found";
+        return;
+    };
+    defer handler.app.allocator.free(svg_content);
 
-        if (std.mem.eql(u8, path, "/groceries")) {
-            r.setStatus(.ok);
-            r.setContentType(.HTML) catch return;
-            r.sendBody(templates.groceries_page_html) catch return;
-            return;
-        }
+    res.status = 200;
+    res.headers.add("content-type", "image/svg+xml");
+    res.body = svg_content;
+    try res.write();
+}
 
-        if (std.mem.eql(u8, path, "/shopping-list")) {
-            r.setStatus(.ok);
-            r.setContentType(.HTML) catch return;
-            r.sendBody(templates.shopping_list_page_html) catch return;
-            return;
-        }
+pub fn cartCountHandler(handler: Handler, req: *httpz.Request, res: *httpz.Response) !void {
+    // Get user ID from JWT
+    const payload = validateJWT(req, res.arena) orelse {
+        res.status = 401;
+        res.body = "401 - Unauthorized";
+        try res.write();
+        return;
+    };
+    defer jwt.deinitPayload(res.arena, payload);
+    const user_id = payload.user_id;
 
-        if (std.mem.startsWith(u8, path, "/api/item-details/")) {
-            self.handleItemDetails(r);
-            return;
-        }
+    // Get cart count from cart manager
+    const count = handler.app.cart_manager.getCartCount(user_id) catch 0;
 
-        if (std.mem.eql(u8, path, "/item-details/default")) {
-            r.setStatus(.ok);
-            r.setContentType(.HTML) catch return;
-            r.sendBody(templates.item_details_default_html) catch return;
-            return;
-        }
+    const count_str = std.fmt.allocPrint(res.arena, "{d}", .{count}) catch {
+        res.status = 500;
+        res.body = "500 - Error";
+        try res.write();
+        return;
+    };
 
-        r.setStatus(.not_found);
-    }
+    res.status = 200;
+    res.content_type = httpz.ContentType.HTML;
+    res.body = count_str;
+    try res.write();
+}
 
-    fn handleItemDetails(self: *PagesEndpoint, r: zap.Request) void {
-        const path = r.path orelse {
-            r.setStatus(.bad_request);
-            return;
-        };
+pub fn groceriesHandler(_: Handler, req: *httpz.Request, res: *httpz.Response) !void {
+    _ = req;
 
-        const prefix = "/api/item-details/";
-        const item_id_str = path[prefix.len..];
-        const item_id = std.fmt.parseInt(u32, item_id_str, 10) catch {
-            r.setStatus(.bad_request);
-            return;
-        };
+    // Serve the groceries page template which will load items via HTMX
+    res.status = 200;
+    res.content_type = httpz.ContentType.HTML;
+    res.body = templates.groceries_page_html;
+    try res.write();
+}
 
-        // Get grocery item from database
-        const grocery_item = self.app_context.database.getGroceryItem(self.app_context.allocator, item_id) catch {
-            r.setStatus(.internal_server_error);
-            return;
-        } orelse {
-            r.setStatus(.not_found);
-            return;
-        };
-        defer self.app_context.allocator.free(grocery_item.name);
-        defer if (grocery_item.svg_data) |svg| self.app_context.allocator.free(svg);
+pub fn apiItemsHandler(handler: Handler, req: *httpz.Request, res: *httpz.Response) !void {
+    _ = req;
 
-        // Load SVG content if available
-        const svg_html = if (grocery_item.svg_data) |svg_content| blk: {
-            // SVG content is now stored directly in database
-            if (svg_content.len == 0) {
-                break :blk "<svg class=\"w-12 h-12 text-gray-400\" fill=\"none\" stroke=\"currentColor\" viewBox=\"0 0 24 24\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M16 11V7a4 4 0 00-8 0v4M5 9h14l1 12H4L5 9z\"></path></svg>";
-            }
-
-            // SVG files now have CSS classes built-in, just return raw content
-            break :blk svg_content;
-        } else "<svg class=\"w-12 h-12 text-gray-400\" fill=\"none\" stroke=\"currentColor\" viewBox=\"0 0 24 24\"><path stroke-linecap=\"round\" stroke-linejoin=\"round\" stroke-width=\"2\" d=\"M16 11V7a4 4 0 00-8 0v4M5 9h14l1 12H4L5 9z\"></path></svg>";
-
-        // Use larger buffer for SVG content
-        var details_buffer: [16384]u8 = undefined;
-        const item_html = std.fmt.bufPrint(
-            &details_buffer,
-            templates.item_details_template,
-            .{ grocery_item.name, svg_html, grocery_item.price, item_id },
-        ) catch {
-            r.setStatus(.internal_server_error);
-            return;
-        };
-
-        r.setStatus(.ok);
-        r.setContentType(.HTML) catch return;
-        r.sendBody(item_html) catch return;
-    }
-};
-
-/// Cart Endpoint - handles all cart operations (JWT protected)
-pub const CartEndpoint = struct {
-    app_context: *AppContext,
-    path: []const u8 = "/api/cart",
-    error_strategy: zap.Endpoint.ErrorStrategy = .log_to_response,
-
-    pub fn init(ctx: *AppContext) CartEndpoint {
-        return CartEndpoint{ .app_context = ctx };
-    }
-
-    pub fn get(self: *CartEndpoint, r: zap.Request) !void {
-        const payload = validateJWTOrRedirect(r, self.app_context) orelse return;
-        defer jwt.deinitPayload(self.app_context.allocator, payload);
-
-        const cart_html = self.generateCartHTMLFromDB(payload.user_id) catch {
-            r.setStatus(.internal_server_error);
-            return;
-        };
-        defer self.app_context.allocator.free(cart_html);
-
-        r.setStatus(.ok);
-        r.setContentType(.HTML) catch return;
-        r.sendBody(cart_html) catch return;
-    }
-
-    pub fn post(self: *CartEndpoint, r: zap.Request) !void {
-        const payload = validateJWTOrRedirect(r, self.app_context) orelse return;
-        defer jwt.deinitPayload(self.app_context.allocator, payload);
-
-        const path = r.path orelse {
-            r.setStatus(.bad_request);
-            return;
-        };
-
-        // Route cart operations based on path
-        if (std.mem.startsWith(u8, path, "/api/cart/add/")) {
-            self.handleCartOperation(r, .add, payload);
-        } else if (std.mem.startsWith(u8, path, "/api/cart/increase-quantity/")) {
-            self.handleCartOperation(r, .increase, payload);
-        } else if (std.mem.startsWith(u8, path, "/api/cart/decrease-quantity/")) {
-            self.handleCartOperation(r, .decrease, payload);
-        } else {
-            r.setStatus(.not_found);
-        }
-    }
-
-    pub fn delete(self: *CartEndpoint, r: zap.Request) !void {
-        const payload = validateJWTOrRedirect(r, self.app_context) orelse return;
-        defer jwt.deinitPayload(self.app_context.allocator, payload);
-
-        const path = r.path orelse {
-            r.setStatus(.bad_request);
-            return;
-        };
-
-        if (std.mem.startsWith(u8, path, "/api/cart/remove/")) {
-            self.handleCartOperation(r, .remove, payload);
-        } else {
-            r.setStatus(.not_found);
-        }
-    }
-
-    fn handleCartOperation(self: *CartEndpoint, r: zap.Request, action: CartAction, payload: jwt.JWTPayload) void {
-        const path = r.path orelse {
-            r.setStatus(.bad_request);
-            return;
-        };
-
-        // Extract item ID from path
-        const prefix = switch (action) {
-            .add => "/api/cart/add/",
-            .increase => "/api/cart/increase-quantity/",
-            .decrease => "/api/cart/decrease-quantity/",
-            .remove => "/api/cart/remove/",
-        };
-
-        if (!std.mem.startsWith(u8, path, prefix)) {
-            r.setStatus(.bad_request);
-            return;
-        }
-
-        const item_id_str = path[prefix.len..];
-        const item_id = std.fmt.parseInt(u32, item_id_str, 10) catch {
-            r.setStatus(.bad_request);
-            return;
-        };
-
-        switch (action) {
-            .add => {
-                self.app_context.cart_manager.addToCart(payload.user_id, item_id) catch {
-                    r.setStatus(.internal_server_error);
-                    return;
-                };
-            },
-            .increase => {
-                self.app_context.cart_manager.increaseQuantity(payload.user_id, item_id) catch {
-                    r.setStatus(.internal_server_error);
-                    return;
-                };
-            },
-            .decrease => {
-                self.app_context.cart_manager.decreaseQuantity(payload.user_id, item_id) catch {
-                    r.setStatus(.internal_server_error);
-                    return;
-                };
-            },
-            .remove => {
-                self.app_context.cart_manager.removeFromCart(payload.user_id, item_id) catch {
-                    r.setStatus(.internal_server_error);
-                    return;
-                };
-            },
-        }
-
-        r.setStatus(.ok);
-
-        // Trigger cart count and total update for all actions
-        r.setHeader("HX-Trigger", "updateCartCount, cartUpdate") catch {};
-
-        if (action == .increase or action == .decrease or action == .remove) {
-            // For quantity updates, we need to check if item still exists and return appropriate response
-            const cart_items = self.app_context.cart_manager.getCart(self.app_context.allocator, payload.user_id) catch {
-                r.setStatus(.internal_server_error);
-                return;
-            };
-            defer {
-                for (cart_items) |item| {
-                    self.app_context.allocator.free(item.name);
-                }
-                self.app_context.allocator.free(cart_items);
-            }
-
-            // Find the item to see its new quantity
-            var found_quantity: ?u32 = null;
-            for (cart_items) |cart_item| {
-                if (cart_item.id == item_id) {
-                    found_quantity = cart_item.quantity;
-                    break;
-                }
-            }
-
-            if (found_quantity == null) {
-                // Item was removed - retarget to entire item and return empty response
-                r.setContentType(.HTML) catch return;
-                var retarget_buf: [32]u8 = undefined;
-                const retarget_str = std.fmt.bufPrint(&retarget_buf, "#cart-item-{d}", .{item_id}) catch {
-                    r.setStatus(.internal_server_error);
-                    return;
-                };
-                r.setHeader("HX-Retarget", retarget_str) catch {};
-                r.setHeader("HX-Reswap", "outerHTML") catch {};
-                r.setHeader("HX-Trigger", "cartUpdate") catch {};
-                r.sendBody("") catch return;
-            } else {
-                // Return updated quantity
-                var quantity_buf: [16]u8 = undefined;
-                const quantity_str = std.fmt.bufPrint(&quantity_buf, "{d}", .{found_quantity.?}) catch {
-                    r.setStatus(.internal_server_error);
-                    return;
-                };
-
-                r.setContentType(.HTML) catch return;
-                r.sendBody(quantity_str) catch return;
-            }
-        }
-    }
-
-    fn generateCartHTMLFromDB(self: *CartEndpoint, user_id: []const u8) ![]u8 {
-        const cart_items = self.app_context.cart_manager.getCart(self.app_context.allocator, user_id) catch {
-            const error_msg = "<p class=\"text-gray-600 text-center\">Error loading cart.</p>";
-            return try self.app_context.allocator.dupe(u8, error_msg);
-        };
-        defer {
-            for (cart_items) |item| {
-                self.app_context.allocator.free(item.name);
-            }
-            self.app_context.allocator.free(cart_items);
-        }
-
-        if (cart_items.len == 0) {
-            const empty_msg = "<p class=\"text-gray-600 text-center\">Your cart is empty.</p>";
-            return try self.app_context.allocator.dupe(u8, empty_msg);
-        }
-
-        var cart_html: std.ArrayList(u8) = .empty;
-        defer cart_html.deinit(self.app_context.allocator);
-
-        const writer = cart_html.writer(self.app_context.allocator);
-        for (cart_items) |item| {
-            try std.fmt.format(
-                writer,
-                templates.cart_item_template,
-                .{ item.id, item.name, item.price, item.id, item.id, item.id, item.quantity, item.id, item.id, item.id, item.id },
-            );
-        }
-
-        return try cart_html.toOwnedSlice(self.app_context.allocator);
-    }
-};
-
-// Items Endpoint - handles grocery items list (JWT protected)
-pub const ItemsEndpoint = struct {
-    app_context: *AppContext,
-    path: []const u8 = "/api/items",
-    error_strategy: zap.Endpoint.ErrorStrategy = .log_to_response,
-
-    pub fn init(ctx: *AppContext) ItemsEndpoint {
-        return ItemsEndpoint{ .app_context = ctx };
-    }
-
-    pub fn get(self: *ItemsEndpoint, r: zap.Request) !void {
-        const payload = validateJWTOrRedirect(r, self.app_context) orelse return;
-        defer jwt.deinitPayload(self.app_context.allocator, payload);
-
-        const items = self.app_context.database.getAllGroceryItems(self.app_context.allocator) catch {
-            r.setStatus(.internal_server_error);
-            return;
-        };
-        defer {
-            for (items) |item| {
-                self.app_context.allocator.free(item.name);
-                // No SVG data to free for list view
-            }
-            self.app_context.allocator.free(items);
-        }
-
-        r.setStatus(.ok);
-        r.setContentType(.HTML) catch return;
-
-        // Use allocator for template rendering
-        var items_html: std.ArrayList(u8) = .empty;
-        defer items_html.deinit(self.app_context.allocator);
-
-        const writer = items_html.writer(self.app_context.allocator);
+    // Get grocery items from database
+    const items = handler.app.database.getAllGroceryItems(handler.app.allocator) catch {
+        res.status = 500;
+        res.body = "500 - Database Error";
+        try res.write();
+        return;
+    };
+    defer {
         for (items) |item| {
-            std.fmt.format(
-                writer,
-                templates.grocery_item_template,
-                .{ item.id, item.name, item.price, item.id },
-            ) catch {
-                r.setStatus(.internal_server_error);
-                return;
-            };
+            handler.app.allocator.free(item.name);
         }
-
-        r.sendBody(items_html.items) catch return;
-    }
-};
-
-// Cart Stats Endpoint - handles cart count and total (JWT protected)
-pub const CartStatsEndpoint = struct {
-    app_context: *AppContext,
-    path: []const u8 = "/cart-count",
-    error_strategy: zap.Endpoint.ErrorStrategy = .log_to_response,
-
-    pub fn init(ctx: *AppContext) CartStatsEndpoint {
-        return CartStatsEndpoint{ .app_context = ctx };
+        handler.app.allocator.free(items);
     }
 
-    pub fn get(self: *CartStatsEndpoint, r: zap.Request) !void {
-        const payload = validateJWTOrRedirect(r, self.app_context) orelse return;
-        defer jwt.deinitPayload(self.app_context.allocator, payload);
+    res.status = 200;
+    res.content_type = httpz.ContentType.HTML;
 
-        const path = r.path orelse {
-            r.setStatus(.bad_request);
+    // Use allocator for template rendering
+    var items_html: std.ArrayList(u8) = .empty;
+    defer items_html.deinit(handler.app.allocator);
+
+    const writer = items_html.writer(handler.app.allocator);
+    for (items) |item| {
+        std.fmt.format(
+            writer,
+            templates.grocery_item_template,
+            .{ item.id, item.name, item.price, item.id },
+        ) catch {
+            res.status = 500;
+            res.body = "500 - Template Error";
+            try res.write();
             return;
         };
-
-        if (std.mem.eql(u8, path, "/cart-count")) {
-            const count = self.app_context.cart_manager.getCartCount(payload.user_id) catch {
-                r.setStatus(.ok);
-                r.setContentType(.HTML) catch return;
-                r.sendBody("0") catch return;
-                return;
-            };
-
-            var count_buf: [16]u8 = undefined;
-            const count_str = std.fmt.bufPrint(&count_buf, "{d}", .{count}) catch {
-                r.setStatus(.internal_server_error);
-                return;
-            };
-
-            r.setStatus(.ok);
-            r.setContentType(.HTML) catch return;
-            r.sendBody(count_str) catch return;
-        } else if (std.mem.eql(u8, path, "/cart-total")) {
-            const total = self.app_context.cart_manager.getCartTotal(self.app_context.allocator, payload.user_id) catch {
-                r.setStatus(.ok);
-                r.setContentType(.HTML) catch return;
-                r.sendBody("0.00") catch return;
-                return;
-            };
-
-            var total_buf: [32]u8 = undefined;
-            const total_str = std.fmt.bufPrint(&total_buf, "${d:.2}", .{total}) catch {
-                r.setStatus(.internal_server_error);
-                return;
-            };
-
-            r.setStatus(.ok);
-            r.setContentType(.HTML) catch return;
-            r.sendBody(total_str) catch return;
-        } else {
-            r.setStatus(.not_found);
-        }
-    }
-};
-
-// Global context for the Zap handler callback
-var app_context: *AppContext = undefined;
-
-// WebSocket upgrade handler
-fn on_upgrade(r: zap.Request, target_protocol: []const u8) !void {
-    // std.log.info("=== WebSocket upgrade requested ===", .{});
-    // std.log.info("Target protocol: {s}", .{target_protocol});
-
-    // Validate WebSocket protocol
-    if (!std.mem.eql(u8, target_protocol, "websocket")) {
-        std.log.info("Rejecting non-WebSocket protocol: {s}", .{target_protocol});
-        return;
     }
 
-    // std.log.info("WebSocket upgrade accepted", .{});
-
-    // Validate JWT for WebSocket connections : send a fake if for testing
-    const payload = validateJWT(r, app_context) orelse {
-        std.log.info("JWT validation failed for WebSocket upgrade", .{});
-        return; // Reject upgrade by returning without calling upgrade
-    };
-    defer jwt.deinitPayload(app_context.allocator, payload);
-
-    // std.log.info("Creating WebSocket context for user: {s}", .{payload.user_id});
-    // const user_id = "user-123345";
-
-    // Upgrade to WebSocket with validated payload.user_id
-    ws.upgradeToWebSocket(r, payload.user_id) catch |err| {
-        std.log.err("WebSocket upgrade failed in on_upgrade: {any}", .{err});
-        return;
-    };
-
-    // std.log.info("WebSocket upgrade completed successfully!", .{});
+    res.body = items_html.items;
+    try res.write();
 }
 
-// Simple handler that uses endpoints
-fn simpleHandler(r: zap.Request) !void {
-    const path = r.path orelse {
-        r.setStatus(.bad_request);
-        r.sendBody("No path") catch return;
+pub fn itemDetailsDefaultHandler(_: Handler, req: *httpz.Request, res: *httpz.Response) !void {
+    _ = req;
+
+    // Serve default item details with the default SVG
+    const default_html = std.fmt.allocPrint(
+        res.arena,
+        templates.item_details_template,
+        .{ "Select an item", templates.default_item_svg, 0.0, 0 },
+    ) catch {
+        res.status = 500;
+        res.body = "500 - Template Error";
+        try res.write();
         return;
     };
 
-    const method = r.methodAsEnum();
-    // std.log.info("Request: {s} {s}", .{ @tagName(method), path });
+    res.status = 200;
+    res.content_type = httpz.ContentType.HTML;
+    res.body = default_html;
+    try res.write();
+}
 
-    // Route to endpoints
-    if (std.mem.eql(u8, path, "/") and method == .GET) {
-        var home_endpoint = HomeEndpoint.init(app_context);
-        try home_endpoint.get(r);
+pub fn apiItemDetailsHandler(handler: Handler, req: *httpz.Request, res: *httpz.Response) !void {
+    // Get item ID from route parameter
+    const item_id_str = req.param("id") orelse {
+        res.status = 400;
+        res.body = "400 - Missing item ID";
+        try res.write();
         return;
-    }
+    };
 
-    if (std.mem.eql(u8, path, "/index.css") and method == .GET) {
-        r.setStatus(.ok);
-        r.setHeader("Content-Type", "text/css") catch return;
-        r.setHeader("Cache-Control", "public, max-age=3600") catch return;
-        r.sendFile("public/index.css") catch return;
+    const item_id = std.fmt.parseInt(u32, item_id_str, 10) catch {
+        res.status = 400;
+        res.body = "400 - Invalid item ID";
+        try res.write();
         return;
-    }
-    if (std.mem.eql(u8, path, "/htmx.min.js") and method == .GET) {
-        r.setStatus(.ok);
-        r.setHeader("Content-Type", "application/javascript") catch return;
-        r.setHeader("Cache-Control", "public, max-age=3600") catch return;
-        r.sendFile("public/htmx.min.js") catch return;
-        return;
-    }
-    if (std.mem.eql(u8, path, "/ws.min.js") and method == .GET) {
-        r.setStatus(.ok);
-        r.setHeader("Content-Type", "application/javascript") catch return;
-        r.setHeader("Cache-Control", "public, max-age=3600") catch return;
-        r.sendFile("public/ws.min.js") catch return;
-        return;
-    }
+    };
 
-    // Pages routes
-    if ((std.mem.eql(u8, path, "/groceries") or
-        std.mem.eql(u8, path, "/shopping-list") or
-        std.mem.eql(u8, path, "/item-details/default") or
-        std.mem.startsWith(u8, path, "/api/item-details/")) and method == .GET)
-    {
-        var pages_endpoint = PagesEndpoint.init(app_context);
-        try pages_endpoint.get(r);
+    // Get grocery item from database
+    const grocery_item = handler.app.database.getGroceryItem(handler.app.allocator, item_id) catch {
+        res.status = 500;
+        res.body = "500 - Database Error";
+        try res.write();
         return;
-    }
-
-    // Items API routes
-    if (std.mem.eql(u8, path, "/api/items") and method == .GET) {
-        var items_endpoint = ItemsEndpoint.init(app_context);
-        try items_endpoint.get(r);
+    } orelse {
+        res.status = 404;
+        res.body = "404 - Item Not Found";
+        try res.write();
         return;
-    }
+    };
+    defer handler.app.allocator.free(grocery_item.name);
+    defer if (grocery_item.svg_data) |svg| handler.app.allocator.free(svg);
 
-    // JWT protected routes below-------------------
-    // Cart routes
-    if (std.mem.startsWith(u8, path, "/api/cart")) {
-        var cart_endpoint = CartEndpoint.init(app_context);
-        if (method == .GET) {
-            try cart_endpoint.get(r);
-        } else if (method == .POST) {
-            try cart_endpoint.post(r);
-        } else if (method == .DELETE) {
-            try cart_endpoint.delete(r);
+    // Load SVG content if available
+    const svg_html = if (grocery_item.svg_data) |svg_content| blk: {
+        if (svg_content.len == 0) {
+            break :blk templates.default_item_svg;
         }
+        break :blk svg_content;
+    } else templates.default_item_svg;
+
+    // Use res.arena for memory allocation (httpz best practice)
+    const item_html = std.fmt.allocPrint(
+        res.arena,
+        templates.item_details_template,
+        .{ grocery_item.name, svg_html, grocery_item.price, item_id },
+    ) catch {
+        res.status = 500;
+        res.body = "500 - Template Error";
+        try res.write();
+        return;
+    };
+
+    res.status = 200;
+    res.content_type = httpz.ContentType.HTML;
+    res.body = item_html;
+    try res.write();
+}
+
+// Shopping cart handlers
+pub fn cartGetHandler(handler: Handler, req: *httpz.Request, res: *httpz.Response) !void {
+    // Get user ID from JWT
+    const payload = validateJWT(req, res.arena) orelse {
+        res.status = 401;
+        res.body = "401 - Unauthorized";
+        try res.write();
+        return;
+    };
+    defer jwt.deinitPayload(res.arena, payload);
+    const user_id = payload.user_id;
+
+    // Get cart items from cart manager
+    const cart_items = handler.app.cart_manager.getCart(handler.app.allocator, user_id) catch {
+        res.status = 500;
+        res.body = "500 - Database Error";
+        try res.write();
+        return;
+    };
+    defer {
+        for (cart_items) |item| {
+            handler.app.allocator.free(item.name);
+        }
+        handler.app.allocator.free(cart_items);
+    }
+
+    if (cart_items.len == 0) {
+        res.status = 200;
+        res.content_type = httpz.ContentType.HTML;
+        res.body = "<p class=\"text-gray-600 text-center\">Your cart is empty.</p>";
+        try res.write();
         return;
     }
 
-    // Cart stats routes
-    if ((std.mem.eql(u8, path, "/cart-count") or std.mem.eql(u8, path, "/cart-total")) and method == .GET) {
-        var cart_stats_endpoint = CartStatsEndpoint.init(app_context);
-        try cart_stats_endpoint.get(r);
+    // Generate cart HTML using template
+    var cart_html: std.ArrayList(u8) = .empty;
+    defer cart_html.deinit(handler.app.allocator);
 
-        return;
+    const writer = cart_html.writer(handler.app.allocator);
+    for (cart_items) |item| {
+        std.fmt.format(
+            writer,
+            templates.cart_item_template,
+            .{ item.id, item.name, item.price, item.id, item.id, item.id, item.quantity, item.id, item.id, item.id, item.id },
+        ) catch {
+            res.status = 500;
+            res.body = "500 - Template Error";
+            try res.write();
+            return;
+        };
     }
 
-    // Note: WebSocket upgrades are now handled by the on_upgrade callback
+    res.status = 200;
+    res.content_type = httpz.ContentType.HTML;
+    res.body = cart_html.items;
+    try res.write();
+}
 
-    // Default 404
-    r.setStatus(.not_found);
-    r.sendBody("404 - Not Found") catch return;
+pub fn cartAddHandler(handler: Handler, req: *httpz.Request, res: *httpz.Response) !void {
+    // Get user ID from JWT
+    const payload = validateJWT(req, res.arena) orelse {
+        res.status = 401;
+        res.body = "401 - Unauthorized";
+        try res.write();
+        return;
+    };
+    defer jwt.deinitPayload(res.arena, payload);
+    const user_id = payload.user_id;
+
+    const item_id_str = req.param("id") orelse {
+        res.status = 400;
+        res.body = "400 - Missing item ID";
+        try res.write();
+        return;
+    };
+
+    const item_id = std.fmt.parseInt(u32, item_id_str, 10) catch {
+        res.status = 400;
+        res.body = "400 - Invalid item ID";
+        try res.write();
+        return;
+    };
+
+    // Add item to cart
+    handler.app.cart_manager.addToCart(user_id, item_id) catch {
+        res.status = 500;
+        res.body = "500 - Cart Error";
+        try res.write();
+        return;
+    };
+
+    res.status = 200;
+    res.headers.add("HX-Trigger", "updateCartCount, cartUpdate");
+    res.body = "";
+    try res.write();
+}
+
+pub fn cartIncreaseHandler(handler: Handler, req: *httpz.Request, res: *httpz.Response) !void {
+    // Get user ID from JWT
+    const payload = validateJWT(req, res.arena) orelse {
+        res.status = 401;
+        res.body = "401 - Unauthorized";
+        try res.write();
+        return;
+    };
+    defer jwt.deinitPayload(res.arena, payload);
+    const user_id = payload.user_id;
+
+    const item_id_str = req.param("id") orelse {
+        res.status = 400;
+        res.body = "400 - Missing item ID";
+        try res.write();
+        return;
+    };
+
+    const item_id = std.fmt.parseInt(u32, item_id_str, 10) catch {
+        res.status = 400;
+        res.body = "400 - Invalid item ID";
+        try res.write();
+        return;
+    };
+
+    // Increase quantity
+    handler.app.cart_manager.increaseQuantity(user_id, item_id) catch {
+        res.status = 500;
+        res.body = "500 - Cart Error";
+        try res.write();
+        return;
+    };
+
+    // Get updated quantity to return (following Zap pattern)
+    const cart_items = handler.app.cart_manager.getCart(handler.app.allocator, user_id) catch {
+        res.status = 500;
+        res.body = "500 - Database Error";
+        try res.write();
+        return;
+    };
+    defer {
+        for (cart_items) |item| {
+            handler.app.allocator.free(item.name);
+        }
+        handler.app.allocator.free(cart_items);
+    }
+
+    // Find the item to return its quantity
+    for (cart_items) |cart_item| {
+        if (cart_item.id == item_id) {
+            const quantity_str = std.fmt.allocPrint(res.arena, "{d}", .{cart_item.quantity}) catch {
+                res.status = 500;
+                res.body = "500 - Error";
+                try res.write();
+                return;
+            };
+
+            res.status = 200;
+            res.content_type = httpz.ContentType.HTML;
+            res.headers.add("HX-Trigger", "updateCartCount, cartUpdate");
+            res.body = quantity_str;
+            try res.write();
+            return;
+        }
+    }
+
+    // Item not found in cart
+    res.status = 404;
+    res.body = "404 - Item not in cart";
+    try res.write();
+}
+
+pub fn cartDecreaseHandler(handler: Handler, req: *httpz.Request, res: *httpz.Response) !void {
+    // Get user ID from JWT
+    const payload = validateJWT(req, res.arena) orelse {
+        res.status = 401;
+        res.body = "401 - Unauthorized";
+        try res.write();
+        return;
+    };
+    defer jwt.deinitPayload(res.arena, payload);
+    const user_id = payload.user_id;
+
+    const item_id_str = req.param("id") orelse {
+        res.status = 400;
+        res.body = "400 - Missing item ID";
+        try res.write();
+        return;
+    };
+
+    const item_id = std.fmt.parseInt(u32, item_id_str, 10) catch {
+        res.status = 400;
+        res.body = "400 - Invalid item ID";
+        try res.write();
+        return;
+    };
+
+    // Decrease quantity
+    handler.app.cart_manager.decreaseQuantity(user_id, item_id) catch {
+        res.status = 500;
+        res.body = "500 - Cart Error";
+        try res.write();
+        return;
+    };
+
+    // Get updated cart to check if item still exists
+    const cart_items = handler.app.cart_manager.getCart(handler.app.allocator, user_id) catch {
+        res.status = 500;
+        res.body = "500 - Database Error";
+        try res.write();
+        return;
+    };
+    defer {
+        for (cart_items) |item| {
+            handler.app.allocator.free(item.name);
+        }
+        handler.app.allocator.free(cart_items);
+    }
+
+    // Check if item still exists
+    for (cart_items) |cart_item| {
+        if (cart_item.id == item_id) {
+            // Item still exists, return updated quantity
+            const quantity_str = std.fmt.allocPrint(res.arena, "{d}", .{cart_item.quantity}) catch {
+                res.status = 500;
+                res.body = "500 - Error";
+                try res.write();
+                return;
+            };
+
+            res.status = 200;
+            res.content_type = httpz.ContentType.HTML;
+            res.headers.add("HX-Trigger", "updateCartCount, cartUpdate");
+            res.body = quantity_str;
+            try res.write();
+            return;
+        }
+    }
+
+    // Item was removed (quantity reached 0) - retarget to entire cart item
+    const retarget_str = std.fmt.allocPrint(res.arena, "#cart-item-{d}", .{item_id}) catch {
+        res.status = 500;
+        res.body = "500 - Error";
+        try res.write();
+        return;
+    };
+
+    res.status = 200;
+    res.content_type = httpz.ContentType.HTML;
+    res.headers.add("HX-Retarget", retarget_str);
+    res.headers.add("HX-Reswap", "outerHTML");
+    res.headers.add("HX-Trigger", "updateCartCount, cartUpdate");
+    res.body = "";
+    try res.write();
+}
+
+pub fn cartRemoveHandler(handler: Handler, req: *httpz.Request, res: *httpz.Response) !void {
+    // Get user ID from JWT
+    const payload = validateJWT(req, res.arena) orelse {
+        res.status = 401;
+        res.body = "401 - Unauthorized";
+        try res.write();
+        return;
+    };
+    defer jwt.deinitPayload(res.arena, payload);
+    const user_id = payload.user_id;
+
+    const item_id_str = req.param("id") orelse {
+        res.status = 400;
+        res.body = "400 - Missing item ID";
+        try res.write();
+        return;
+    };
+
+    const item_id = std.fmt.parseInt(u32, item_id_str, 10) catch {
+        res.status = 400;
+        res.body = "400 - Invalid item ID";
+        try res.write();
+        return;
+    };
+
+    // Remove item from cart
+    handler.app.cart_manager.removeFromCart(user_id, item_id) catch {
+        res.status = 500;
+        res.body = "500 - Cart Error";
+        try res.write();
+        return;
+    };
+
+    res.status = 200;
+    res.content_type = httpz.ContentType.HTML;
+    res.headers.add("HX-Trigger", "updateCartCount, cartUpdate");
+    res.body = "";
+    try res.write();
+}
+
+pub fn shoppingListHandler(_: Handler, req: *httpz.Request, res: *httpz.Response) !void {
+    _ = req;
+
+    // Serve the shopping list page template which will load cart via HTMX
+    res.status = 200;
+    res.content_type = httpz.ContentType.HTML;
+    res.body = templates.shopping_list_page_html;
+    try res.write();
+}
+
+pub fn cartTotalHandler(handler: Handler, req: *httpz.Request, res: *httpz.Response) !void {
+    // Get user ID from JWT
+    const payload = validateJWT(req, res.arena) orelse {
+        res.status = 401;
+        res.body = "401 - Unauthorized";
+        try res.write();
+        return;
+    };
+    defer jwt.deinitPayload(res.arena, payload);
+    const user_id = payload.user_id;
+
+    // Get cart total from cart manager
+    const total = handler.app.cart_manager.getCartTotal(handler.app.allocator, user_id) catch 0.0;
+
+    const total_str = std.fmt.allocPrint(res.arena, "${d:.2}", .{total}) catch {
+        res.status = 500;
+        res.body = "500 - Error";
+        try res.write();
+        return;
+    };
+
+    res.status = 200;
+    res.content_type = httpz.ContentType.HTML;
+    res.body = total_str;
+    try res.write();
+}
+
+pub fn presenceHandler(handler: Handler, req: *httpz.Request, res: *httpz.Response) !void {
+    return ws_httpz.websocketHandler(handler, req, res);
+}
+
+pub fn shutdownHandler(_: Handler, _: *httpz.Request, res: *httpz.Response) !void {
+    res.status = 200;
+    res.content_type = httpz.ContentType.TEXT;
+    res.body = "Server shutting down...";
+    try res.write();
+
+    // Exit gracefully to trigger defer blocks
+    std.process.exit(0);
 }
 
 pub fn main() !void {
@@ -686,50 +687,66 @@ pub fn main() !void {
         .thread_safe = true,
     }){};
     defer {
+        if (builtin.mode != .ReleaseFast and builtin.mode != .ReleaseSmall) {
+            const leaks = gpa.detectLeaks();
+            std.debug.print("Leaks detected?: {}\n", .{leaks});
+        }
         const deinit_status = gpa.deinit();
         if (deinit_status == .leak) {
             std.log.err("Memory leaks detected!", .{});
         }
     }
 
-    {
-        const allocator = switch (builtin.mode) {
-            .Debug, .ReleaseSafe => gpa.allocator(),
-            .ReleaseFast, .ReleaseSmall => std.heap.c_allocator,
-        };
+    const allocator = switch (builtin.mode) {
+        .Debug, .ReleaseSafe => gpa.allocator(),
+        .ReleaseFast, .ReleaseSmall => std.heap.c_allocator,
+    };
 
-        // Initialize application context
-        const ctx = try allocator.create(AppContext);
-        ctx.* = try AppContext.init(allocator);
-        defer {
-            ctx.deinit();
-            allocator.destroy(ctx);
-        }
+    // <hhtpz ----------------------------------->
+    var app = try allocator.create(AppContext);
+    app.* = try AppContext.init(allocator);
+    defer app.deinit();
 
-        // HTTP Listener with WebSocket upgrade support
-        var listener = zap.HttpListener.init(.{
-            .port = 8080,
-            .interface = "0.0.0.0", // Listen on all interfaces
-            .on_request = simpleHandler,
-            .on_upgrade = on_upgrade, // Add WebSocket upgrade handler
-            .log = false,
-            // .public_folder = "src/html",
-        });
+    const config = httpz.Config{
+        .port = 8880,
+        .thread_pool = .{
+            .count = 64,
+            .buffer_size = 131072,
+            .backlog = 2000,
+        },
+        .workers = .{
+            .count = 2,
+            .large_buffer_count = 32,
+            .large_buffer_size = 131072,
+        },
 
-        // Store context for handler access
-        app_context = ctx;
+        // .request = .{
+        //     .buffer_size = 8192,
+        // },
+    };
 
-        // Initialize WebSocket context manager
-        ws.initGlobalContextManager(allocator, ctx.cart_manager);
-        defer ws.deinitGlobalContextManager();
+    var server = try httpz.Server(Handler).init(allocator, config, Handler{ .app = app });
+    var router = try server.router(.{});
 
-        try listener.listen();
-
-        std.log.info("Server started on http://0.0.0.0:8080", .{});
-        zap.start(.{ .threads = 2, .workers = 1 });
-    }
-    if (builtin.mode != .ReleaseFast and builtin.mode != .ReleaseSmall) {
-        const leaks = gpa.detectLeaks();
-        std.debug.print("Leaks detected?: {}\n", .{leaks});
-    }
+    router.get("/", indexHandler, .{});
+    router.get("/index.css", cssHandler, .{});
+    router.get("/htmx.min.js", htmxHandler, .{});
+    router.get("/ws.min.js", wsHandler, .{});
+    router.get("/svg/:filename", svgHandler, .{});
+    router.get("/cart-count", cartCountHandler, .{});
+    router.get("/groceries", groceriesHandler, .{});
+    router.get("/api/items", apiItemsHandler, .{});
+    router.get("/item-details/default", itemDetailsDefaultHandler, .{});
+    router.get("/api/item-details/:id", apiItemDetailsHandler, .{});
+    router.get("/api/cart", cartGetHandler, .{});
+    router.post("/api/cart/add/:id", cartAddHandler, .{});
+    router.post("/api/cart/increase-quantity/:id", cartIncreaseHandler, .{});
+    router.post("/api/cart/decrease-quantity/:id", cartDecreaseHandler, .{});
+    router.delete("/api/cart/remove/:id", cartRemoveHandler, .{});
+    router.get("/shopping-list", shoppingListHandler, .{});
+    router.get("/cart-total", cartTotalHandler, .{});
+    router.get("/presence", presenceHandler, .{});
+    router.get("/shutdown", shutdownHandler, .{});
+    std.log.info("httpz server listening on port 8880", .{});
+    try server.listen();
 }

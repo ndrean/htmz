@@ -4,13 +4,18 @@ pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
-    const zap = b.dependency("zap", .{
-        .target = target,
-        .optimize = optimize,
-        .openssl = false, // disable TLS for now
-    });
+    // const zap = b.dependency("zap", .{
+    //     .target = target,
+    //     .optimize = optimize,
+    //     .openssl = false, // disable TLS for now
+    // });
 
     const sqlite = b.dependency("sqlite", .{
+        .target = target,
+        .optimize = optimize,
+    });
+
+    const httpz = b.dependency("httpz", .{
         .target = target,
         .optimize = optimize,
     });
@@ -25,7 +30,8 @@ pub fn build(b: *std.Build) void {
     });
 
     exe.root_module.addImport("sqlite", sqlite.module("sqlite"));
-    exe.root_module.addImport("zap", zap.module("zap"));
+    // exe.root_module.addImport("zap", zap.module("zap"));
+    exe.root_module.addImport("httpz", httpz.module("httpz"));
 
     b.installArtifact(exe);
 

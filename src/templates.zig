@@ -1,4 +1,10 @@
 //! This file contains HTML templates and response constants used in the web application.
+
+// Default SVG icon for items without custom SVG
+pub const default_item_svg =
+    \\<svg class="w-12 h-12 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 11V7a4 4 0 00-8 0v4M5 9h14l1 12H4L5 9z"></path></svg>
+;
+
 pub const grocery_item_template =
     \\<div class="bg-white rounded-lg p-4 shadow-md flex justify-between items-center transition-transform transform hover:scale-[1.02] cursor-pointer" hx-get="/api/item-details/{d}" hx-target="#item-details-card" hx-swap="innerHTML"><div><span class="text-lg font-semibold text-gray-900">{s}</span><span class="text-sm text-gray-500 ml-2">${d:.2}</span></div><button class="px-4 py-2 bg-blue-500 text-white text-sm font-medium rounded-full hover:bg-blue-600 transition-colors" hx-post="/api/cart/add/{d}" hx-swap="none" onclick="event.stopPropagation()">Add to Cart</button></div>
 ;

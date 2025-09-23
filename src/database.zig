@@ -22,6 +22,7 @@ fn readSVGFile(allocator: std.mem.Allocator, filename: []const u8) ![]const u8 {
 
 pub const Database = struct {
     db: sqlite.Db,
+    mutex: std.Thread.Mutex,
 
     pub fn init(allocator: std.mem.Allocator, db_path: []const u8) !Database {
         _ = db_path; // Not needed for memory mode
@@ -42,7 +43,10 @@ pub const Database = struct {
             .threading_mode = .MultiThread,
         });
 
-        var database = Database{ .db = db };
+        var database = Database{
+            .db = db,
+            .mutex = .{},
+        };
 
         // No PRAGMA statements - testing if they were causing the performance issues
 
@@ -125,6 +129,9 @@ pub const Database = struct {
     };
 
     pub fn getGroceryItem(self: *Database, allocator: std.mem.Allocator, item_id: u32) !?GroceryItem {
+        self.mutex.lock();
+        defer self.mutex.unlock();
+
         const sql = "SELECT id, name, price, image FROM items WHERE id = ?";
         var stmt = try self.db.prepare(sql);
         defer stmt.deinit();
@@ -156,6 +163,9 @@ pub const Database = struct {
     }
 
     pub fn getAllGroceryItems(self: *Database, allocator: std.mem.Allocator) ![]GroceryItem {
+        self.mutex.lock();
+        defer self.mutex.unlock();
+
         const sql = "SELECT id, name, price FROM items ORDER BY id";
         var stmt = try self.db.prepare(sql);
         defer stmt.deinit();

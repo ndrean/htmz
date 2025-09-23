@@ -55,7 +55,7 @@ export default function () {
   }
   // Realistic user think time (1-5 seconds)
   // sleep(Math.random() * 4 + 1);
-  sleep(0.2);
+  sleep(0.1);
 
   // Determine current stage using k6 execution context elapsed time
   const elapsedMs = Date.now() - exec.scenario.startTime;

@@ -715,7 +715,7 @@ pub fn main() !void {
             .backlog = 2000,
         },
         .workers = .{
-            .count = 2,
+            .count = 1,
             .large_buffer_count = 32,
             .large_buffer_size = 131072,
         },

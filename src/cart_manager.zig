@@ -118,24 +118,20 @@ pub const CartManager = struct {
                 const quantity = entry.value_ptr.*;
 
                 // Get item details from database
-                if (self.main_db.getGroceryItem(allocator, item_id)) |grocery_item_opt| {
-                    if (grocery_item_opt) |grocery_item| {
-                        defer allocator.free(grocery_item.name);
-                        defer if (grocery_item.svg_data) |svg| allocator.free(svg);
+                if (self.main_db.getGroceryItem(allocator, item_id) catch null) |grocery_item| {
+                    defer allocator.free(grocery_item.name);
+                    defer if (grocery_item.svg_data) |svg| allocator.free(svg);
 
-                        const item_name = try allocator.dupe(
-                            u8,
-                            grocery_item.name,
-                        );
-                        try cart_items.append(allocator, database.CartItem{
-                            .id = item_id,
-                            .name = item_name,
-                            .quantity = quantity,
-                            .price = grocery_item.price,
-                        });
-                    }
-                } else |_| {
-                    continue;
+                    const item_name = try allocator.dupe(
+                        u8,
+                        grocery_item.name,
+                    );
+                    try cart_items.append(allocator, database.CartItem{
+                        .id = item_id,
+                        .name = item_name,
+                        .quantity = quantity,
+                        .price = grocery_item.price,
+                    });
                 }
             }
         } else {}
@@ -170,15 +166,10 @@ pub const CartManager = struct {
                 const quantity = entry.value_ptr.*;
 
                 // Get price from database
-                if (self.main_db.getGroceryItem(allocator, item_id)) |grocery_item_opt| {
-                    if (grocery_item_opt) |grocery_item| {
-                        defer allocator.free(grocery_item.name);
-                        defer if (grocery_item.svg_data) |svg| allocator.free(svg);
-                        total += grocery_item.price * @as(f32, @floatFromInt(quantity));
-                    }
-                } else |_| {
-                    // Skip items that can't be found in database
-                    continue;
+                if (self.main_db.getGroceryItem(allocator, item_id) catch null) |grocery_item| {
+                    defer allocator.free(grocery_item.name);
+                    defer if (grocery_item.svg_data) |svg| allocator.free(svg);
+                    total += grocery_item.price * @as(f32, @floatFromInt(quantity));
                 }
             }
             return total;

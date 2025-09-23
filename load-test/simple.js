@@ -20,7 +20,7 @@ export const options = {
   },
 };
 
-const BASE_URL = "http://localhost:8080"; // JWT + SQLite server
+const BASE_URL = "http://91.98.129.192:8080"; // JWT + SQLite server
 
 const itemIds = [1, 2, 3, 4, 5, 6, 7];
 

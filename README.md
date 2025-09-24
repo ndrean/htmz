@@ -201,10 +201,10 @@ pnpm -F htmz make:public
 zig build -Dtarget=x86_64-linux-musl -Doptimize=ReleaseFast
 ```
 
-- copy local binaries and assets to the VPS
+- copy local binaries and assets to the VPS for the `zap` version
 
 ```sh
-scp ./zig-out/bin/htmz root@ipv4-address:opt/htmz/htmz
+scp ./zig-out/bin/htmz root@ipv4-address:opt/htmz/htmz-zap
 
 scp -r public/ root@ipv4-address:opt/htmz/
 
@@ -214,9 +214,9 @@ scp .zig-cache/o/27f03ab08e098dc623c09f5bb4932c03/libfacil.io.so root@91.98.129.
 In the VPS:
 
 ```sh
-root@debian-4gb-nbg1-1:~ cd opt/htmz && chmod +x htmz
+root@debian-4gb-nbg1-1:~ cd opt/htmz && chmod +x htmz-zap
 
-root@debian-4gb-nbg1-1:~ LD_LIBRARY_PATH=./lib SECRET_KEY=ziggit ./htmz
+root@debian-4gb-nbg1-1:~ LD_LIBRARY_PATH=./lib SECRET_KEY=ziggit ./htmz-zap
 ```
 
 - hammer the VPS from home:
@@ -230,7 +230,7 @@ BASE_URL=http://ipv4-address:8080 k6 run load-test/progressive-test.js
 ```sh
 root@debian-4gb-nbg1-1:~ sudo tee /etc/systemd/system/htmz.service > /dev/null << 'EOF'
 [Unit]
-  Description=HTMZ Web Server
+  Description=HTMZ Web Server (Zap-facil.io implementation)
   After=network.target
 
 [Service]
@@ -239,7 +239,7 @@ root@debian-4gb-nbg1-1:~ sudo tee /etc/systemd/system/htmz.service > /dev/null <
   WorkingDirectory=/root/opt/htmz
   Environment=LD_LIBRARY_PATH=/root/opt/htmz/lib
   Environment=SECRET_KEY=ziggit
-  ExecStart=/root/opt/htmz/htmz
+  ExecStart=/root/opt/htmz/htmz-zap
   Restart=always
 
 [Install]
@@ -250,20 +250,20 @@ root@debian-4gb-nbg1-1:~ sudo tee /etc/systemd/system/htmz.service > /dev/null <
 ```sh
 root@debian-4gb-nbg1-1:~ sudo systemctl daemon-reload
 # auto-start on boot
-root@debian-4gb-nbg1-1:~ sudo systemctl enable htmz
+root@debian-4gb-nbg1-1:~ sudo systemctl enable htmz-zap
 
-root@debian-4gb-nbg1-1:~ sudo systemctl start htmz
-root@debian-4gb-nbg1-1:~ sudo systemctl status htmz
+root@debian-4gb-nbg1-1:~ sudo systemctl start htmz-zap
+root@debian-4gb-nbg1-1:~ sudo systemctl status htmz-zap
 
-root@debian-4gb-nbg1-1:~ sudo systemctl stop htmz
-root@debian-4gb-nbg1-1:~ sudo systemctl restart htmz
+root@debian-4gb-nbg1-1:~ sudo systemctl stop htmz-zap
+root@debian-4gb-nbg1-1:~ sudo systemctl restart htmz-zap
 ```
 
 Logs:
 
 ```sh
-sudo journalctl -u htmz -f   # Live logs
-sudo journalctl -u htmz      # All logs
+sudo journalctl -u htmz-zap -f   # Live logs
+sudo journalctl -u htmz-zap      # All logs
 ```
 
 Check if the server is running: <https://htmz.online>
@@ -285,7 +285,7 @@ curl -v -H "Cookie: jwt_token=test" http://localhost:8080/api/items
 - Useful!:
 
 ```sh
-pkill -f "htmz"
+pkill -f "htmz-zap"
 
 lsof -ti:8080 | xargs kill
 ```

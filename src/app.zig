@@ -7,7 +7,7 @@ const cart_manager = @import("cart_manager.zig");
 const templates = @import("templates.zig");
 const ws_httpz = @import("ws_httpz.zig");
 
-// Embed static files at compile time for better performance
+// Embed static files at compile time
 const static_html = @embedFile("html/index.html.gz");
 const static_css = @embedFile("html/index.css.gz");
 const static_htmx = @embedFile("html/htmx.min.js.gz");
@@ -29,7 +29,7 @@ const AppContext = struct {
     pub fn init(allocator: std.mem.Allocator) !AppContext {
         // Heap allocation needed because cart_manager needs mutable reference to database
         const db = try allocator.create(database.Database);
-        // used .Memory for simplicity, so path is userless in fact
+        // create database file with 2 connections in pool
         db.* = try database.Database.init(allocator, "htmz.sql3", 2);
 
         const cm = try allocator.create(cart_manager.CartManager);
@@ -152,33 +152,6 @@ pub fn wsHandler(_: Handler, _: *httpz.Request, res: *httpz.Response) !void {
     try res.write();
 }
 
-pub fn svgHandler(handler: Handler, req: *httpz.Request, res: *httpz.Response) !void {
-    const filename = req.params.get("filename") orelse {
-        res.status = 404;
-        res.body = "404 - SVG Not Found";
-        return;
-    };
-
-    var path_buffer: [512]u8 = undefined;
-    const svg_path = std.fmt.bufPrint(&path_buffer, "public/svg/{s}", .{filename}) catch {
-        res.status = 404;
-        res.body = "404 - SVG Path Error";
-        return;
-    };
-
-    const svg_content = std.fs.cwd().readFileAlloc(handler.app.allocator, svg_path, 64 * 1024) catch {
-        res.status = 404;
-        res.body = "404 - SVG File Not Found";
-        return;
-    };
-    defer handler.app.allocator.free(svg_content);
-
-    res.status = 200;
-    res.headers.add("content-type", "image/svg+xml");
-    res.body = svg_content;
-    try res.write();
-}
-
 pub fn cartCountHandler(handler: Handler, req: *httpz.Request, res: *httpz.Response) !void {
     // Get user ID from JWT
     const payload = validateJWT(req, res.arena) orelse {
@@ -219,28 +192,23 @@ pub fn groceriesHandler(_: Handler, req: *httpz.Request, res: *httpz.Response) !
 pub fn apiItemsHandler(handler: Handler, req: *httpz.Request, res: *httpz.Response) !void {
     _ = req;
 
-    // Get grocery items from database
-    const items = handler.app.database.getAllGroceryItems(handler.app.allocator) catch {
+    // Get grocery items from database (using arena - no manual cleanup needed)
+    const items = handler.app.database.getAllGroceryItems(res.arena) catch {
         res.status = 500;
         res.body = "500 - Database Error";
         try res.write();
         return;
     };
-    defer {
-        for (items) |item| {
-            handler.app.allocator.free(item.name);
-        }
-        handler.app.allocator.free(items);
-    }
+    // No defer needed - arena handles cleanup automatically
 
     res.status = 200;
     res.content_type = httpz.ContentType.HTML;
 
-    // Use allocator for template rendering
+    // Use arena for template rendering
     var items_html: std.ArrayList(u8) = .empty;
-    defer items_html.deinit(handler.app.allocator);
+    defer items_html.deinit(res.arena);
 
-    const writer = items_html.writer(handler.app.allocator);
+    const writer = items_html.writer(res.arena);
     for (items) |item| {
         std.fmt.format(
             writer,
@@ -279,6 +247,7 @@ pub fn itemDetailsDefaultHandler(_: Handler, req: *httpz.Request, res: *httpz.Re
     try res.write();
 }
 
+/// retrieve SVG data from database and render item details page
 pub fn apiItemDetailsHandler(handler: Handler, req: *httpz.Request, res: *httpz.Response) !void {
     // Get item ID from route parameter
     const item_id_str = req.param("id") orelse {
@@ -295,8 +264,8 @@ pub fn apiItemDetailsHandler(handler: Handler, req: *httpz.Request, res: *httpz.
         return;
     };
 
-    // Get grocery item from database
-    const grocery_item = handler.app.database.getGroceryItem(handler.app.allocator, item_id) catch {
+    // Get grocery item from database (using arena - no manual cleanup needed)
+    const grocery_item = handler.app.database.getGroceryItem(res.arena, item_id) catch {
         res.status = 500;
         res.body = "500 - Database Error";
         try res.write();
@@ -307,8 +276,7 @@ pub fn apiItemDetailsHandler(handler: Handler, req: *httpz.Request, res: *httpz.
         try res.write();
         return;
     };
-    defer handler.app.allocator.free(grocery_item.name);
-    defer if (grocery_item.svg_data) |svg| handler.app.allocator.free(svg);
+    // No defer needed - arena handles cleanup automatically
 
     // Load SVG content if available
     const svg_html = if (grocery_item.svg_data) |svg_content| blk: {
@@ -348,19 +316,14 @@ pub fn cartGetHandler(handler: Handler, req: *httpz.Request, res: *httpz.Respons
     defer jwt.deinitPayload(res.arena, payload);
     const user_id = payload.user_id;
 
-    // Get cart items from cart manager
-    const cart_items = handler.app.cart_manager.getCart(handler.app.allocator, user_id) catch {
+    // Get cart items from cart manager (using arena - no manual cleanup needed)
+    const cart_items = handler.app.cart_manager.getCart(res.arena, user_id) catch {
         res.status = 500;
         res.body = "500 - Database Error";
         try res.write();
         return;
     };
-    defer {
-        for (cart_items) |item| {
-            handler.app.allocator.free(item.name);
-        }
-        handler.app.allocator.free(cart_items);
-    }
+    // No defer needed - arena handles cleanup automatically
 
     if (cart_items.len == 0) {
         res.status = 200;
@@ -370,11 +333,11 @@ pub fn cartGetHandler(handler: Handler, req: *httpz.Request, res: *httpz.Respons
         return;
     }
 
-    // Generate cart HTML using template
+    // Generate cart HTML using template (using arena)
     var cart_html: std.ArrayList(u8) = .empty;
-    defer cart_html.deinit(handler.app.allocator);
+    defer cart_html.deinit(res.arena);
 
-    const writer = cart_html.writer(handler.app.allocator);
+    const writer = cart_html.writer(res.arena);
     for (cart_items) |item| {
         std.fmt.format(
             writer,
@@ -466,19 +429,14 @@ pub fn cartIncreaseHandler(handler: Handler, req: *httpz.Request, res: *httpz.Re
         return;
     };
 
-    // Get updated quantity to return (following Zap pattern)
-    const cart_items = handler.app.cart_manager.getCart(handler.app.allocator, user_id) catch {
+    // Get updated quantity to return (using arena - no manual cleanup needed)
+    const cart_items = handler.app.cart_manager.getCart(res.arena, user_id) catch {
         res.status = 500;
         res.body = "500 - Database Error";
         try res.write();
         return;
     };
-    defer {
-        for (cart_items) |item| {
-            handler.app.allocator.free(item.name);
-        }
-        handler.app.allocator.free(cart_items);
-    }
+    // No defer needed - arena handles cleanup automatically
 
     // Find the item to return its quantity
     for (cart_items) |cart_item| {
@@ -538,19 +496,14 @@ pub fn cartDecreaseHandler(handler: Handler, req: *httpz.Request, res: *httpz.Re
         return;
     };
 
-    // Get updated cart to check if item still exists
-    const cart_items = handler.app.cart_manager.getCart(handler.app.allocator, user_id) catch {
+    // Get updated cart to check if item still exists (using arena - no manual cleanup needed)
+    const cart_items = handler.app.cart_manager.getCart(res.arena, user_id) catch {
         res.status = 500;
         res.body = "500 - Database Error";
         try res.write();
         return;
     };
-    defer {
-        for (cart_items) |item| {
-            handler.app.allocator.free(item.name);
-        }
-        handler.app.allocator.free(cart_items);
-    }
+    // No defer needed - arena handles cleanup automatically
 
     // Check if item still exists
     for (cart_items) |cart_item| {
@@ -650,8 +603,8 @@ pub fn cartTotalHandler(handler: Handler, req: *httpz.Request, res: *httpz.Respo
     defer jwt.deinitPayload(res.arena, payload);
     const user_id = payload.user_id;
 
-    // Get cart total from cart manager
-    const total = handler.app.cart_manager.getCartTotal(handler.app.allocator, user_id) catch 0.0;
+    // Get cart total from cart manager (using arena)
+    const total = handler.app.cart_manager.getCartTotal(res.arena, user_id) catch 0.0;
 
     const total_str = std.fmt.allocPrint(res.arena, "${d:.2}", .{total}) catch {
         res.status = 500;
@@ -670,14 +623,59 @@ pub fn presenceHandler(handler: Handler, req: *httpz.Request, res: *httpz.Respon
     return ws_httpz.websocketHandler(handler, req, res);
 }
 
-pub fn shutdownHandler(_: Handler, _: *httpz.Request, res: *httpz.Response) !void {
-    res.status = 200;
-    res.content_type = httpz.ContentType.TEXT;
-    res.body = "Server shutting down...";
-    try res.write();
+// Global references for proper shutdown - will be set in main()
+var global_gpa: ?*std.heap.GeneralPurposeAllocator(.{
+    .safety = true,
+    .thread_safe = true,
+}) = null;
 
-    // Exit gracefully to trigger defer blocks
-    std.process.exit(0);
+var global_server: ?*httpz.Server(Handler) = null;
+
+// Signal handler for graceful shutdown
+fn signalHandler(_: c_int) callconv(.c) void {
+    if (global_server) |server| {
+        std.log.info("** SHUTDOWN SIGNAL RECEIVED **", .{});
+        global_server = null;
+        server.stop();
+    }
+}
+
+// Cleanup function called after server.listen() returns
+fn performCleanup() void {
+    std.log.info("** PERFORMING CLEANUP **", .{});
+
+    // Clean up the global WebSocket clients ArrayList and any remaining clients
+    if (global_gpa) |gpa| {
+        const allocator = switch (builtin.mode) {
+            .Debug, .ReleaseSafe => gpa.allocator(),
+            .ReleaseFast, .ReleaseSmall => std.heap.c_allocator,
+        };
+        std.log.info("Cleaning up WebSocket clients...", .{});
+        ws_httpz.deinitWebSocketClients(allocator);
+    }
+
+    std.log.info("** CLEANUP COMPLETE **", .{});
+}
+
+/// Cleanup handler to clear all carts => useful for testing with k6
+pub fn cleanupCartsHandler(handler: Handler, _: *httpz.Request, res: *httpz.Response) !void {
+    // Clear all carts (useful after tests)
+    handler.app.cart_manager.rwlock.lock();
+    defer handler.app.cart_manager.rwlock.unlock();
+
+    var iter = handler.app.cart_manager.user_carts.iterator();
+    var count: u32 = 0;
+    while (iter.next()) |entry| {
+        handler.app.cart_manager.allocator.free(entry.key_ptr.*);
+        entry.value_ptr.deinit();
+        count += 1;
+    }
+    handler.app.cart_manager.user_carts.clearAndFree();
+
+    const result = std.fmt.allocPrint(res.arena, "Cleaned up {d} carts", .{count}) catch "Cleanup complete";
+    res.status = 200;
+    res.body = result;
+    try res.write();
 }
 
 pub fn main() !void {
@@ -686,15 +684,32 @@ pub fn main() !void {
         .safety = true,
         .thread_safe = true,
     }){};
+
+    // Set global references for shutdown access
+    global_gpa = &gpa;
+
+    // Setup signal handler for graceful shutdown (Ctrl+C)
+    if (builtin.os.tag != .windows) {
+        std.posix.sigaction(std.posix.SIG.INT, &.{
+            .handler = .{ .handler = signalHandler },
+            .mask = std.posix.sigemptyset(),
+            .flags = 0,
+        }, null);
+        std.log.info("Use Ctrl+C to shutdown gracefully", .{});
+    }
+
     defer {
+        std.log.info("** FINAL MEMORY LEAK DETECTION **", .{});
         if (builtin.mode != .ReleaseFast and builtin.mode != .ReleaseSmall) {
             const leaks = gpa.detectLeaks();
-            std.debug.print("Leaks detected?: {}\n", .{leaks});
+            std.log.info("Pre-deinit leak check: {}", .{leaks});
         }
         const deinit_status = gpa.deinit();
-        if (deinit_status == .leak) {
-            std.log.err("Memory leaks detected!", .{});
+        switch (deinit_status) {
+            .ok => std.log.info("No memory leaks detected", .{}),
+            .leak => std.log.err("!! Memory leaks detected !!", .{}),
         }
+        std.log.info("** MEMORY ANALYSIS COMPLETE **", .{});
     }
 
     const allocator = switch (builtin.mode) {
@@ -702,9 +717,7 @@ pub fn main() !void {
         .ReleaseFast, .ReleaseSmall => std.heap.c_allocator,
     };
 
-    // <hhtpz ----------------------------------->
-    var app = try allocator.create(AppContext);
-    app.* = try AppContext.init(allocator);
+    var app = try AppContext.init(allocator);
     defer app.deinit();
 
     const config = httpz.Config{
@@ -720,20 +733,24 @@ pub fn main() !void {
             .large_buffer_count = 32,
             .large_buffer_size = 131_072,
         },
-
-        // .request = .{
-        //     .buffer_size = 8192,
-        // },
     };
 
-    var server = try httpz.Server(Handler).init(allocator, config, Handler{ .app = app });
+    var server = try httpz.Server(Handler).init(
+        allocator,
+        config,
+        Handler{ .app = &app },
+    );
+    defer server.deinit();
+
+    // Store global server reference for shutdown
+    global_server = &server;
+
     var router = try server.router(.{});
 
     router.get("/", indexHandler, .{});
     router.get("/index.css", cssHandler, .{});
     router.get("/htmx.min.js", htmxHandler, .{});
     router.get("/ws.min.js", wsHandler, .{});
-    router.get("/svg/:filename", svgHandler, .{});
     router.get("/cart-count", cartCountHandler, .{});
     router.get("/groceries", groceriesHandler, .{});
     router.get("/api/items", apiItemsHandler, .{});
@@ -747,7 +764,14 @@ pub fn main() !void {
     router.get("/shopping-list", shoppingListHandler, .{});
     router.get("/cart-total", cartTotalHandler, .{});
     router.get("/presence", presenceHandler, .{});
-    router.get("/shutdown", shutdownHandler, .{});
+    router.get("/cleanup-carts", cleanupCartsHandler, .{});
+
     std.log.info("httpz server listening on port 8880", .{});
+    std.log.info("Press Ctrl+C to shutdown gracefully", .{});
+
+    // This blocks until server.stop() is called from signal handler
     try server.listen();
+
+    // Server stopped, perform cleanup
+    performCleanup();
 }

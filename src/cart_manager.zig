@@ -53,7 +53,11 @@ pub const CartManager = struct {
         return self.main_db;
     }
 
-    pub fn addToCart(self: *CartManager, user_id: []const u8, item_id: u32) !void {
+    pub fn addToCart(
+        self: *CartManager,
+        user_id: []const u8,
+        item_id: u32,
+    ) !void {
         self.rwlock.lock();
         defer self.rwlock.unlock();
 
@@ -68,7 +72,11 @@ pub const CartManager = struct {
         }
     }
 
-    pub fn removeFromCart(self: *CartManager, user_id: []const u8, item_id: u32) !void {
+    pub fn removeFromCart(
+        self: *CartManager,
+        user_id: []const u8,
+        item_id: u32,
+    ) !void {
         self.rwlock.lock();
         defer self.rwlock.unlock();
 
@@ -77,7 +85,11 @@ pub const CartManager = struct {
         }
     }
 
-    pub fn increaseQuantity(self: *CartManager, user_id: []const u8, item_id: u32) !void {
+    pub fn increaseQuantity(
+        self: *CartManager,
+        user_id: []const u8,
+        item_id: u32,
+    ) !void {
         self.rwlock.lock();
         defer self.rwlock.unlock();
 
@@ -88,7 +100,11 @@ pub const CartManager = struct {
         }
     }
 
-    pub fn decreaseQuantity(self: *CartManager, user_id: []const u8, item_id: u32) !void {
+    pub fn decreaseQuantity(
+        self: *CartManager,
+        user_id: []const u8,
+        item_id: u32,
+    ) !void {
         self.rwlock.lock();
         defer self.rwlock.unlock();
 
@@ -104,7 +120,11 @@ pub const CartManager = struct {
         }
     }
 
-    pub fn getCart(self: *CartManager, allocator: std.mem.Allocator, user_id: []const u8) ![]database.CartItem {
+    pub fn getCart(
+        self: *CartManager,
+        allocator: std.mem.Allocator,
+        user_id: []const u8,
+    ) ![]database.CartItem {
         self.rwlock.lockShared();
         defer self.rwlock.unlockShared();
 

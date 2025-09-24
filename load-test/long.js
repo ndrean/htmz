@@ -10,10 +10,8 @@ export const options = {
       executor: "ramping-vus",
       startVUs: 0,
       stages: [
-        { duration: "10s", target: 5_000 }, // Ramp to 2K users
-        { duration: "30s", target: 5_000 }, // Hold at 2K users (Plateau 1)
-        { duration: "30s", target: 8_000 }, // Ramp to 6K users
-        { duration: "30s", target: 8_000 }, // Hold at 6K users (Plateau 2)
+        { duration: "10s", target: 4_000 }, // Ramp to 2K users
+        { duration: "3000s", target: 4_000 }, // Hold at 2K users (Plateau 2)
         { duration: "10s", target: 0 }, // Ramp down
       ],
     },
@@ -30,9 +28,7 @@ const itemIds = [1, 2, 3, 4, 5, 6, 7];
 
 // Custom metrics per plateau
 const plateau5k = new Trend("http_req_duration_5k");
-const plateau10k = new Trend("http_req_duration_10k");
 const requests5k = new Counter("http_reqs_5k");
-const requests10k = new Counter("http_reqs_10k");
 
 // Global JWT cookie for this VU
 let jwtCookie = null;
@@ -66,10 +62,7 @@ export default function () {
   let currentStage = "none";
   // 10-40s: 5K plate
   // au (10s ramp + 30s hold)
-  if (elapsedSeconds >= 10 && elapsedSeconds <= 40) currentStage = "plateau5k";
-  // 50-80s: 10K plateau (after 10s ramp, 30s hold)
-  if (elapsedSeconds >= 70 && elapsedSeconds <= 100)
-    currentStage = "plateau10k";
+  if (elapsedSeconds >= 10 && elapsedSeconds <= 310) currentStage = "plateau5k";
 
   const randomItemId = itemIds[Math.floor(Math.random() * itemIds.length)];
 
@@ -103,11 +96,7 @@ export default function () {
   if (currentStage === "plateau5k") {
     plateau5k.add(response.timings.duration);
     requests5k.add(1);
-  } else if (currentStage === "plateau10k") {
-    plateau10k.add(response.timings.duration);
-    requests10k.add(1);
   }
-  // Ignore ramp periods ("none")
 
   check(response, {
     "add to cart status 200": (r) => r.status === 200,
@@ -126,9 +115,6 @@ export default function () {
   if (currentStage === "plateau5k") {
     plateau5k.add(response.timings.duration);
     requests5k.add(1);
-  } else if (currentStage === "plateau10k") {
-    plateau10k.add(response.timings.duration);
-    requests10k.add(1);
   }
 
   check(response, {
@@ -145,11 +131,9 @@ export function handleSummary(data) {
 
   // Calculate requests per second for each plateau
   const plateau5kReqs = metrics.http_reqs_5k?.values?.count || 0;
-  const plateau10kReqs = metrics.http_reqs_10k?.values?.count || 0;
 
   // Plateau durations (30s each)
   const reqs5kPerSec = plateau5kReqs / 30;
-  const reqs10kPerSec = plateau10kReqs / 30;
 
   console.log(`
 === PROGRESSIVE LOAD TEST: PLATEAU PERFORMANCE ===
@@ -163,15 +147,7 @@ export function handleSummary(data) {
     metrics.http_req_duration_5k?.values?.["p(95)"]?.toFixed(2) || "N/A"
   }ms
 
-📊 PLATEAU 2 (10K VUs - 30s):
-  Requests: ${plateau10kReqs.toLocaleString()}
-  Req/s: ${reqs10kPerSec.toFixed(0)}
-  Avg Response Time: ${
-    metrics.http_req_duration_10k?.values?.avg?.toFixed(2) || "N/A"
-  }ms
-  95th Percentile: ${
-    metrics.http_req_duration_10k?.values?.["p(95)"]?.toFixed(2) || "N/A"
-  }ms
+
 
 === OVERALL RESULTS ===
 Peak VUs: ${metrics.vus_max.values.max}

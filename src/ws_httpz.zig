@@ -53,8 +53,11 @@ pub const WSClient = struct {
             clients_initialized = true;
         }
 
+        // Make our own copy of user_id since JWT payload will be freed
+        const user_id_copy = try context.allocator.dupe(u8, context.user_id);
+
         const self = @This(){
-            .user_id = context.user_id,
+            .user_id = user_id_copy,
             .conn = conn,
             .allocator = context.allocator,
         };
@@ -86,6 +89,8 @@ pub const WSClient = struct {
     pub fn clientClose(self: *@This(), data: []const u8) !void {
         _ = data; // Close reason data
 
+        std.log.info("Cleaning up WebSocket client for user: {s}", .{self.user_id});
+
         // Remove from clients list
         {
             clients_mutex.lock();
@@ -106,6 +111,10 @@ pub const WSClient = struct {
         broadcastPresenceCount(new_count) catch |err| {
             std.log.err("Failed to broadcast presence count on disconnect: {any}", .{err});
         };
+
+        // Free only the user_id string - the WebSocket framework manages the client struct lifecycle
+        std.log.info("Freeing user_id string for: {s}", .{self.user_id});
+        self.allocator.free(self.user_id);
     }
 
     pub fn deinit(_: *@This()) void {
@@ -163,5 +172,32 @@ pub fn websocketHandler(handler: anytype, req: *httpz.Request, res: *httpz.Respo
         res.status = 200;
         res.content_type = httpz.ContentType.TEXT;
         res.body = count_str;
+    }
+}
+
+// Cleanup function for shutdown - cleans up the global clients ArrayList
+// Individual clients should clean themselves up in clientClose(), but during
+// server shutdown we need to clean up the ArrayList itself and any remaining clients
+pub fn deinitWebSocketClients(allocator: std.mem.Allocator) void {
+    if (clients_initialized) {
+        clients_mutex.lock();
+        defer clients_mutex.unlock();
+
+        std.log.info("Cleaning up global WebSocket clients list ({} clients remaining)", .{clients.items.len});
+
+        // Clean up any remaining clients that didn't get a chance to call clientClose
+        for (clients.items) |client| {
+            std.log.info("Cleaning up remaining client user_id: {s}", .{client.user_id});
+            allocator.free(client.user_id);
+            // Note: Don't destroy the client struct - WebSocket framework handles that
+        }
+
+        // Deinit the ArrayList itself
+        clients.deinit(allocator);
+        clients_initialized = false;
+
+        std.log.info("Global WebSocket clients list cleaned up", .{});
+    } else {
+        std.log.info("WebSocket clients list was not initialized", .{});
     }
 }

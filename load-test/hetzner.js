@@ -10,10 +10,10 @@ export const options = {
       executor: "ramping-vus",
       startVUs: 0,
       stages: [
-        { duration: "10s", target: 5_000 }, // Ramp to 2K users
-        { duration: "30s", target: 5_000 }, // Hold at 2K users (Plateau 1)
-        { duration: "30s", target: 8_000 }, // Ramp to 6K users
-        { duration: "30s", target: 8_000 }, // Hold at 6K users (Plateau 2)
+        { duration: "10s", target: 2_000 }, // Ramp to 2K users
+        { duration: "30s", target: 2_000 }, // Hold at 2K users (Plateau 1)
+        { duration: "30s", target: 6_000 }, // Ramp to 6K users
+        { duration: "30s", target: 6_000 }, // Hold at 6K users (Plateau 2)
         { duration: "10s", target: 0 }, // Ramp down
       ],
     },
@@ -24,15 +24,14 @@ export const options = {
 };
 
 // const BASE_URL = __ENV.BASE_URL || "http://localhost:8880";
-// const BASE_URL = "http://91.98.129.192:8080";
-const BASE_URL = "http://localhost:8880";
+const BASE_URL = "http://91.98.129.192:8880";
 const itemIds = [1, 2, 3, 4, 5, 6, 7];
 
 // Custom metrics per plateau
-const plateau5k = new Trend("http_req_duration_5k");
-const plateau10k = new Trend("http_req_duration_10k");
-const requests5k = new Counter("http_reqs_5k");
-const requests10k = new Counter("http_reqs_10k");
+const plateau2k = new Trend("http_req_duration_2k");
+const plateau6k = new Trend("http_req_duration_6k");
+const requests2k = new Counter("http_reqs_2k");
+const requests6k = new Counter("http_reqs_6k");
 
 // Global JWT cookie for this VU
 let jwtCookie = null;
@@ -57,19 +56,17 @@ export default function () {
   }
   // Realistic user think time (1-5 seconds)
   // sleep(Math.random() * 4 + 1);
-  sleep(0.1);
+  sleep(0.2);
 
   // Determine current stage using k6 execution context elapsed time
   const elapsedMs = Date.now() - exec.scenario.startTime;
   const elapsedSeconds = elapsedMs / 1000;
 
   let currentStage = "none";
-  // 10-40s: 5K plate
-  // au (10s ramp + 30s hold)
-  if (elapsedSeconds >= 10 && elapsedSeconds <= 40) currentStage = "plateau5k";
-  // 50-80s: 10K plateau (after 10s ramp, 30s hold)
-  if (elapsedSeconds >= 70 && elapsedSeconds <= 100)
-    currentStage = "plateau10k";
+  // 10-40s: 2K plateau (after 10s ramp, 30s hold)
+  if (elapsedSeconds >= 10 && elapsedSeconds <= 40) currentStage = "plateau2k";
+  // 50-80s: 6K plateau (after 10s ramp, 30s hold)
+  if (elapsedSeconds >= 70 && elapsedSeconds <= 100) currentStage = "plateau6k";
 
   const randomItemId = itemIds[Math.floor(Math.random() * itemIds.length)];
 
@@ -100,12 +97,12 @@ export default function () {
   });
 
   // Record metrics only during actual plateaus
-  if (currentStage === "plateau5k") {
-    plateau5k.add(response.timings.duration);
-    requests5k.add(1);
-  } else if (currentStage === "plateau10k") {
-    plateau10k.add(response.timings.duration);
-    requests10k.add(1);
+  if (currentStage === "plateau2k") {
+    plateau2k.add(response.timings.duration);
+    requests2k.add(1);
+  } else if (currentStage === "plateau6k") {
+    plateau6k.add(response.timings.duration);
+    requests6k.add(1);
   }
   // Ignore ramp periods ("none")
 
@@ -123,12 +120,12 @@ export default function () {
   });
 
   // Record metrics for remove request too
-  if (currentStage === "plateau5k") {
-    plateau5k.add(response.timings.duration);
-    requests5k.add(1);
-  } else if (currentStage === "plateau10k") {
-    plateau10k.add(response.timings.duration);
-    requests10k.add(1);
+  if (currentStage === "plateau2k") {
+    plateau2k.add(response.timings.duration);
+    requests2k.add(1);
+  } else if (currentStage === "plateau6k") {
+    plateau6k.add(response.timings.duration);
+    requests6k.add(1);
   }
 
   check(response, {
@@ -144,33 +141,33 @@ export function handleSummary(data) {
   const metrics = data.metrics;
 
   // Calculate requests per second for each plateau
-  const plateau5kReqs = metrics.http_reqs_5k?.values?.count || 0;
-  const plateau10kReqs = metrics.http_reqs_10k?.values?.count || 0;
+  const plateau2kReqs = metrics.http_reqs_2k?.values?.count || 0;
+  const plateau6kReqs = metrics.http_reqs_6k?.values?.count || 0;
 
   // Plateau durations (30s each)
-  const reqs5kPerSec = plateau5kReqs / 30;
-  const reqs10kPerSec = plateau10kReqs / 30;
+  const reqs2kPerSec = plateau2kReqs / 30;
+  const reqs6kPerSec = plateau6kReqs / 30;
 
   console.log(`
 === PROGRESSIVE LOAD TEST: PLATEAU PERFORMANCE ===
-📊 PLATEAU 1 (5K VUs - 30s):
-  Requests: ${plateau5kReqs.toLocaleString()}
-  Req/s: ${reqs5kPerSec.toFixed(0)}
+📊 PLATEAU 1 (2K VUs - 30s):
+  Requests: ${plateau2kReqs.toLocaleString()}
+  Req/s: ${reqs2kPerSec.toFixed(0)}
   Avg Response Time: ${
-    metrics.http_req_duration_5k?.values?.avg?.toFixed(2) || "N/A"
+    metrics.http_req_duration_2k?.values?.avg?.toFixed(2) || "N/A"
   }ms
   95th Percentile: ${
-    metrics.http_req_duration_5k?.values?.["p(95)"]?.toFixed(2) || "N/A"
+    metrics.http_req_duration_2k?.values?.["p(95)"]?.toFixed(2) || "N/A"
   }ms
 
-📊 PLATEAU 2 (10K VUs - 30s):
-  Requests: ${plateau10kReqs.toLocaleString()}
-  Req/s: ${reqs10kPerSec.toFixed(0)}
+📊 PLATEAU 2 (6K VUs - 30s):
+  Requests: ${plateau6kReqs.toLocaleString()}
+  Req/s: ${reqs6kPerSec.toFixed(0)}
   Avg Response Time: ${
-    metrics.http_req_duration_10k?.values?.avg?.toFixed(2) || "N/A"
+    metrics.http_req_duration_6k?.values?.avg?.toFixed(2) || "N/A"
   }ms
   95th Percentile: ${
-    metrics.http_req_duration_10k?.values?.["p(95)"]?.toFixed(2) || "N/A"
+    metrics.http_req_duration_6k?.values?.["p(95)"]?.toFixed(2) || "N/A"
   }ms
 
 === OVERALL RESULTS ===

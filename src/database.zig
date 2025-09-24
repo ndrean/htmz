@@ -186,10 +186,6 @@ pub const Database = struct {
         }
     }
 
-    fn createTables(_: *Database) !void {
-        // No cart table needed - using HashMap for cart storage
-    }
-
     // Grocery items functions
     pub const GroceryItem = struct {
         id: u32,

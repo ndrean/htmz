@@ -12,8 +12,8 @@ export const options = {
       stages: [
         { duration: "10s", target: 2_000 }, // Ramp to 2K users
         { duration: "30s", target: 2_000 }, // Hold at 2K users (Plateau 1)
-        { duration: "10s", target: 6_000 }, // Ramp to 6K users
-        { duration: "30s", target: 6_000 }, // Hold at 6K users (Plateau 2)
+        { duration: "40s", target: 8_000 }, // Ramp to 6K users
+        { duration: "30s", target: 8_000 }, // Hold at 6K users (Plateau 2)
         { duration: "10s", target: 0 }, // Ramp down
       ],
     },
@@ -24,8 +24,8 @@ export const options = {
 };
 
 // const BASE_URL = __ENV.BASE_URL || "http://localhost:8880";
-// const BASE_URL = "http://91.98.129.192:8080";
-const BASE_URL = "http://localhost:8880";
+const BASE_URL = "http://91.98.129.192:8880";
+// const BASE_URL = "http://localhost:8880";
 const itemIds = [1, 2, 3, 4, 5, 6, 7];
 
 // Custom metrics per plateau
@@ -57,7 +57,7 @@ export default function () {
   }
   // Realistic user think time (1-5 seconds)
   // sleep(Math.random() * 4 + 1);
-  sleep(0.1);
+  sleep(0.2);
 
   // Determine current stage using k6 execution context elapsed time
   const elapsedMs = Date.now() - exec.scenario.startTime;
@@ -68,7 +68,8 @@ export default function () {
   // au (10s ramp + 30s hold)
   if (elapsedSeconds >= 10 && elapsedSeconds <= 40) currentStage = "plateau5k";
   // 50-80s: 10K plateau (after 10s ramp, 30s hold)
-  if (elapsedSeconds >= 50 && elapsedSeconds <= 80) currentStage = "plateau10k";
+  if (elapsedSeconds >= 80 && elapsedSeconds <= 110)
+    currentStage = "plateau10k";
 
   const randomItemId = itemIds[Math.floor(Math.random() * itemIds.length)];
 

@@ -10,10 +10,10 @@ export const options = {
       executor: "ramping-vus",
       startVUs: 0,
       stages: [
-        { duration: "10s", target: 2_000 }, // Ramp to 2K users
-        { duration: "30s", target: 2_000 }, // Hold at 2K users (Plateau 1)
-        { duration: "30s", target: 6_000 }, // Ramp to 6K users
-        { duration: "30s", target: 6_000 }, // Hold at 6K users (Plateau 2)
+        { duration: "100s", target: 1_000 }, // Ramp to 1K users
+        { duration: "30s", target: 1_000 }, // Hold at 1K users (Plateau 1)
+        { duration: "10s", target: 1_000 }, // Ramp to 6K users
+        { duration: "30s", target: 1_000 }, // Hold at 6K users (Plateau 2)
         { duration: "10s", target: 0 }, // Ramp down
       ],
     },
@@ -24,7 +24,8 @@ export const options = {
 };
 
 // const BASE_URL = __ENV.BASE_URL || "http://localhost:8880";
-const BASE_URL = "http://91.98.129.192:8880";
+// const BASE_URL = "http://91.98.129.192:8880";
+const BASE_URL = "https://httpz.htmz.online";
 const itemIds = [1, 2, 3, 4, 5, 6, 7];
 
 // Custom metrics per plateau
@@ -56,7 +57,7 @@ export default function () {
   }
   // Realistic user think time (1-5 seconds)
   // sleep(Math.random() * 4 + 1);
-  sleep(0.2);
+  sleep(0.25);
 
   // Determine current stage using k6 execution context elapsed time
   const elapsedMs = Date.now() - exec.scenario.startTime;
@@ -64,9 +65,11 @@ export default function () {
 
   let currentStage = "none";
   // 10-40s: 2K plateau (after 10s ramp, 30s hold)
-  if (elapsedSeconds >= 10 && elapsedSeconds <= 40) currentStage = "plateau2k";
+  if (elapsedSeconds >= 100 && elapsedSeconds <= 130)
+    currentStage = "plateau2k";
   // 50-80s: 6K plateau (after 10s ramp, 30s hold)
-  if (elapsedSeconds >= 70 && elapsedSeconds <= 100) currentStage = "plateau6k";
+  if (elapsedSeconds >= 130 && elapsedSeconds <= 170)
+    currentStage = "plateau6k";
 
   const randomItemId = itemIds[Math.floor(Math.random() * itemIds.length)];
 
@@ -146,7 +149,7 @@ export function handleSummary(data) {
 
   // Plateau durations (30s each)
   const reqs2kPerSec = plateau2kReqs / 30;
-  const reqs6kPerSec = plateau6kReqs / 30;
+  const reqs6kPerSec = plateau6kReqs / 40;
 
   console.log(`
 === PROGRESSIVE LOAD TEST: PLATEAU PERFORMANCE ===

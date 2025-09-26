@@ -164,12 +164,12 @@ cat /proc/$SERVER_PID/status | grep -E 'VmRSS|VmSize'
 
 ## Deploy on `Hetzner`
 
-2 VCPU x86, 4GB RAM machine with `Debian` and `musl`
+CX22 machine, 2 VCPU x86, 4GB RAM machine with `Debian` and `musl`
   
 Static assets (HTML, CSS, SVG, HTMX.JS) are compiled into the code.
 The `SVG`s are extracted from the SQLite database and interpolated as text.
 
-Poduction built:
+Production built:
 
 ```sh
 # build with target
@@ -252,18 +252,23 @@ Check if the server is running: <https://httpz.htmz.online>
 
 ## Notes
 
+`-v` lets you inspect the headers so you can see when cookies are being set and sent.
+
 - grab a cookie for testing:
 
 ```sh
-curl -v -c cookies.txt http://localhost:8080/
+curl -v --cookie-jar cookies.txt http://localhost:8080/
 ```
 
-- pass the cookie for testing:
+(or `-v -c`)
+
+- pass the cookie for testing a POST endpoint:
 
 ```sh
-curl -v -c cookies.txt http://91.98.129.192:8080
-curl -v -H "Cookie: jwt_token=test" http://localhost:8080/api/items
+curl -v --cookie cookies.txt -X POST http://91.98.129.192:8080/api/cart/add/1
 ```
+
+(or `-v -b`)
 
 - Useful!:
 
@@ -277,7 +282,7 @@ lsof -it:8880 | xargs kill <pid>
 
 ## Results
 
-- httpz local
+### local
 
 ```txt
 📊 PLATEAU 1 (2K VUs - 30s):
@@ -298,7 +303,7 @@ Total Requests: 1722822
 Failed Requests: 0.00%
 ```
 
-- httpz on VPS
+### Deployed on VPS
   
 ```txt
 === PROGRESSIVE LOAD TEST: PLATEAU PERFORMANCE ===
@@ -308,14 +313,15 @@ Failed Requests: 0.00%
   Avg Response Time: 27.67ms
   95th Percentile: 32.66ms
 
-📊 PLATEAU 2 (6K VUs - 30s):
-  Requests: 760496
-  Req/s: 25350
-  Avg Response Time: 33.93ms
-  95th Percentile: 49.41ms
+📊 PLATEAU 2 (8K VUs - 30s):
+  Requests: 899734
+  Req/s: 29991
+  Avg Response Time: 59.65ms
+  95th Percentile: 113.91ms
 
-=== OVERALL RESULTS ===
-Peak VUs: 6000
-Total Requests: 1722822
+=== ZIG VPS OVERALL RESULTS ===
+Peak VUs: 8000
+Total Requests: 2223424
 Failed Requests: 0.00%
 ```
+

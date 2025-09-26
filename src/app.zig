@@ -650,7 +650,7 @@ fn performCleanup() void {
             .Debug, .ReleaseSafe => gpa.allocator(),
             .ReleaseFast, .ReleaseSmall => std.heap.c_allocator,
         };
-        std.log.info("Cleaning up WebSocket clients...", .{});
+        // std.log.info("Cleaning up WebSocket clients...", .{});
         ws_httpz.deinitWebSocketClients(allocator);
     }
 
@@ -674,6 +674,26 @@ pub fn cleanupCartsHandler(handler: Handler, _: *httpz.Request, res: *httpz.Resp
 
     const result = std.fmt.allocPrint(res.arena, "Cleaned up {d} carts", .{count}) catch "Cleanup complete";
     res.status = 200;
+    res.body = result;
+    try res.write();
+}
+
+/// Cart statistics handler - shows logical cart count for memory leak tracking
+pub fn cartStatsHandler(handler: Handler, _: *httpz.Request, res: *httpz.Response) !void {
+    handler.app.cart_manager.rwlock.lockShared();
+    defer handler.app.cart_manager.rwlock.unlockShared();
+
+    const user_count = handler.app.cart_manager.user_carts.count();
+    var total_items: u32 = 0;
+
+    var iter = handler.app.cart_manager.user_carts.iterator();
+    while (iter.next()) |entry| {
+        total_items += @intCast(entry.value_ptr.count());
+    }
+
+    const result = std.fmt.allocPrint(res.arena, "{{ \"users\": {d}, \"total_items\": {d} }}", .{ user_count, total_items }) catch "{ \"users\": 0, \"total_items\": 0 }";
+    res.status = 200;
+    res.content_type = httpz.ContentType.JSON;
     res.body = result;
     try res.write();
 }
@@ -765,6 +785,7 @@ pub fn main() !void {
     router.get("/cart-total", cartTotalHandler, .{});
     router.get("/presence", presenceHandler, .{});
     router.get("/cleanup-carts", cleanupCartsHandler, .{});
+    router.get("/cart-stats", cartStatsHandler, .{});
 
     std.log.info("httpz server listening on port 8880", .{});
     std.log.info("Press Ctrl+C to shutdown gracefully", .{});

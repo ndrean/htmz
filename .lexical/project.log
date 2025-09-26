@@ -1,0 +1,5 @@
+2025-09-24T17:09:44.722910+02:00 info: Resolved entity: {:call, Kernel, :defmodule, 2}
+2025-09-25T06:43:03.954243+02:00 info: Resolved entity: {:variable, :import}
+2025-09-25T06:43:13.500581+02:00 info: Resolved entity: {:variable, :import}
+2025-09-25T06:43:13.773657+02:00 info: Plugins found 0 results in 0.009 ms
+2025-09-25T06:48:39.672948+02:00 info: Resolved entity: {:variable, :import}

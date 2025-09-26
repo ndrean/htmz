@@ -54,24 +54,26 @@
           hx-trigger="click"
           >Grocery List</a
         >
-        <a
-          class="px-6 py-3 font-semibold text-blue-600 rounded-lg transition-colors duration-200 hover:bg-blue-100 cursor-pointer"
-          hx-get="/shopping-list"
-          hx-target="#content"
-          hx-push-url="true"
-          hx-trigger="click"
-          >Shopping List &nbsp
+        <div class="flex items-center">
+          <a
+            class="px-6 py-3 font-semibold text-blue-600 rounded-lg transition-colors duration-200 hover:bg-blue-100 cursor-pointer"
+            hx-get="/shopping-list"
+            hx-target="#content"
+            hx-push-url="true"
+            hx-trigger="click"
+            >Shopping List</a
+          >
           <span
             id="cart-badge"
             class="ml-2 bg-red-500 text-white text-xs font-bold px-2 py-1 rounded-full"
             hx-get="/cart-count"
             hx-target="this"
             hx-swap="innerHTML"
-            hx-trigger="load, updateCartCount from:body"
+            hx-trigger="updateCartCount from:body"
           >
             0
-          </span></a
-        >
+          </span>
+        </div>
       </nav>
       <!-- Main content area will be loaded here -->
       <div

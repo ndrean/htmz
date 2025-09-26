@@ -1,0 +1,12 @@
+17:09:44.573 [info] opened file:///Users/nevendrean/code/zig/htmz_phx/mix.exs
+17:09:44.722 [info] Resolved entity: {:call, Kernel, :defmodule, 2}
+17:09:44.749 [warning] Task Elixir.LXical.Server.Provider.Handlers.CodeAction.handle/2 ran for  29 ms. Result :success
+17:31:16.111 [error] read protocol message: {:unknown_notification, "$/setTrace"}
+06:43:03.873 [info] opened file:///Users/nevendrean/code/zig/htmz_phx/config/runtime.exs
+06:43:03.954 [info] Resolved entity: {:variable, :import}
+06:43:03.955 [warning] Task Elixir.LXical.Server.Provider.Handlers.CodeAction.handle/2 ran for  4 ms. Result :success
+06:43:13.500 [info] Resolved entity: {:variable, :import}
+06:43:13.501 [warning] Task Elixir.LXical.Server.Provider.Handlers.CodeAction.handle/2 ran for  1 ms. Result :success
+06:48:39.593 [info] opened file:///Users/nevendrean/code/zig/htmz_phx/config/prod.exs
+06:48:39.672 [info] Resolved entity: {:variable, :import}
+06:48:39.673 [warning] Task Elixir.LXical.Server.Provider.Handlers.CodeAction.handle/2 ran for  3 ms. Result :success

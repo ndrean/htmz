@@ -12,7 +12,8 @@ pub const JWTPayload = struct {
     exp: i64,
 };
 
-/// We generate a simplified JWT-like token for session management.
+/// We generate a simplified JWT-like token for session management
+///
 /// The token is not a standard JWT, but a custom format for simplicity
 ///
 /// The token is a hex string of 96 characters (48 bytes)

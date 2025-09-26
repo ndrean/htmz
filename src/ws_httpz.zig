@@ -1,6 +1,7 @@
 const std = @import("std");
 const httpz = @import("httpz");
 const jwt = @import("jwt.zig");
+const cart_manager = @import("cart_manager.zig");
 
 const websocket = httpz.websocket;
 
@@ -40,10 +41,12 @@ pub const WSClient = struct {
     user_id: []const u8,
     conn: *websocket.Conn,
     allocator: std.mem.Allocator,
+    cart_manager: *cart_manager.CartManager,
 
     pub const WSContext = struct {
         user_id: []const u8,
         allocator: std.mem.Allocator,
+        cart_manager: *cart_manager.CartManager,
     };
 
     pub fn init(conn: *websocket.Conn, context: *const WSContext) !@This() {
@@ -60,6 +63,7 @@ pub const WSClient = struct {
             .user_id = user_id_copy,
             .conn = conn,
             .allocator = context.allocator,
+            .cart_manager = context.cart_manager,
         };
 
         return self;
@@ -89,7 +93,10 @@ pub const WSClient = struct {
     pub fn clientClose(self: *@This(), data: []const u8) !void {
         _ = data; // Close reason data
 
-        std.log.info("Cleaning up WebSocket client for user: {s}", .{self.user_id});
+        // std.log.info("Cleaning up WebSocket client for user: {s}", .{self.user_id});
+
+        // Clean up user's cart data
+        self.cart_manager.removeUserCart(self.user_id);
 
         // Remove from clients list
         {
@@ -160,6 +167,7 @@ pub fn websocketHandler(handler: anytype, req: *httpz.Request, res: *httpz.Respo
     const ctx = WSClient.WSContext{
         .user_id = payload.user_id,
         .allocator = handler.app.allocator,
+        .cart_manager = handler.app.cart_manager,
     };
 
     // Attempt to upgrade the connection using httpz built-in WebSocket support

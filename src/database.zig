@@ -116,7 +116,7 @@ pub const Database = struct {
         };
 
         // Initialize and populate the template database first
-        try database.createTables();
+        // try database.createTables();
         try database.createItems(allocator);
 
         // Create connection pool (8 connections for 8 workers) sharing the same file

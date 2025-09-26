@@ -197,12 +197,26 @@ pub const CartManager = struct {
         return 0.0;
     }
 
-    pub fn clearCart(self: *CartManager, user_id: []const u8) !void {
+    // pub fn clearCart(self: *CartManager, user_id: []const u8) !void {
+    //     self.rwlock.lock();
+    //     defer self.rwlock.unlock();
+
+    //     if (self.user_carts.getPtr(user_id)) |cart| {
+    //         cart.clearAndFree();
+    //     }
+    // }
+
+    pub fn removeUserCart(self: *CartManager, user_id: []const u8) void {
         self.rwlock.lock();
         defer self.rwlock.unlock();
 
-        if (self.user_carts.getPtr(user_id)) |cart| {
-            cart.clearAndFree();
+        if (self.user_carts.fetchRemove(user_id)) |removed_entry| {
+            // Free the user_id key
+            self.allocator.free(removed_entry.key);
+            // Deinit the inner HashMap - need to make mutable copy
+            var cart = removed_entry.value;
+            cart.deinit();
+            // std.log.info("Removed user cart for: {s}", .{user_id});
         }
     }
 

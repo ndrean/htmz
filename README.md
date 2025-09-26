@@ -164,16 +164,16 @@ cat /proc/$SERVER_PID/status | grep -E 'VmRSS|VmSize'
 
 ## Deploy on `Hetzner`
 
-CX22 machine, 2 VCPU x86, 4GB RAM machine with `Debian` and `musl`
+CX22 machine, 2 VCPU x86, 4GB RAM machine with `Debian`.
   
-Static assets (HTML, CSS, SVG, HTMX.JS) are compiled into the code.
-The `SVG`s are extracted from the SQLite database and interpolated as text.
+- Static assets (HTML, CSS, SVG, HTMX.JS) are compiled into the code.
+- The `SVG`s are saved as text into the SQLite database, and then fetched and interpolated as text into the rendered template.
 
 Production built:
 
 ```sh
 # build with target
-zig build -Dtarget=x86_64-linux-musl -Doptimize=ReleaseFast
+zig build -Dtarget=x86_64-linux-gnu -Doptimize=ReleaseFast
 ```
 
 - copy local binaries and assets to the VPS
@@ -181,7 +181,7 @@ zig build -Dtarget=x86_64-linux-musl -Doptimize=ReleaseFast
 ```sh
 scp ./zig-out/bin/htmz root@ipv4-address:opt/htmz/htmz-httpz
 
-# SQLite fills its "items" table with the SVGs
+# the SVGs are saved in the /public/ssvsg folder. SQLite fills its "items" table with the SVGs as text.
 scp -r public/ root@ipv4-address:opt/htmz/
 ```
 
@@ -193,10 +193,10 @@ root@debian-4gb-nbg1-1:~ cd opt/htmz && chmod +x htmz-httpz
 root@debian-4gb-nbg1-1:~ SECRET_KEY=ziggit ./htmz-httpz
 ```
 
-- hammer the VPS from home:
+- hammer the VPS from home: the `httpz` server is listening on port 8880 (to be `Cloudflare` compatible).
 
 ```sh
-BASE_URL=http://ipv4-address:8080 k6 run load-test/progressive-test.js 
+BASE_URL=http://ipv4-address:8880 k6 run load-test/progressive-test.js 
 ```
 
 ### Daemonize - Create service

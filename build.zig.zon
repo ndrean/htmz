@@ -17,6 +17,10 @@
             .url = "git+https://github.com/karlseguin/http.zig?ref=master#18e0f2d2b64fcc8d8351e6b0b734170b46f91024",
             .hash = "httpz-0.0.0-PNVzrFm5BgBSwbIfjg-nFNI1HAJzzPVFHYInimLC8CfY",
         },
+        .okredis = .{
+            .url = "git+https://github.com/kristoff-it/zig-okredis#f53ad9f03a57d41d89b3ee779aaca608e1e4767f",
+            .hash = "okredis-0.1.0-Cg726vcEBAAjrhwgBJ2cjL4qN3ircjBsX6iTd7wEFiEC",
+        },
     },
     .paths = .{
         "build.zig",

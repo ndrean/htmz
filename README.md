@@ -325,3 +325,9 @@ Total Requests: 2223424
 Failed Requests: 0.00%
 ```
 
+## Valkey
+
+- Key: cart:{user_id}
+- Hash fields: item_id → quantity
+- Example: HSET cart:user_123 1 2 2 1 stores item 1
+  qty 2, item 2 qty 1

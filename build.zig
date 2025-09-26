@@ -20,6 +20,11 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
 
+    const okredis = b.dependency("okredis", .{
+        .target = target,
+        .optimize = optimize,
+    });
+
     const exe = b.addExecutable(.{
         .name = "htmz",
         .root_module = b.createModule(.{
@@ -30,8 +35,10 @@ pub fn build(b: *std.Build) void {
     });
 
     exe.root_module.addImport("sqlite", sqlite.module("sqlite"));
-    // exe.root_module.addImport("zap", zap.module("zap"));
+
     exe.root_module.addImport("httpz", httpz.module("httpz"));
+
+    exe.root_module.addImport("okredis", okredis.module("okredis"));
 
     b.installArtifact(exe);
 

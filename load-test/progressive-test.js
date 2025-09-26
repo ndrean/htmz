@@ -10,10 +10,10 @@ export const options = {
       executor: "ramping-vus",
       startVUs: 0,
       stages: [
-        { duration: "10s", target: 2_000 }, // Ramp to 2K users
-        { duration: "30s", target: 2_000 }, // Hold at 2K users (Plateau 1)
-        { duration: "40s", target: 8_000 }, // Ramp to 6K users
-        { duration: "30s", target: 8_000 }, // Hold at 6K users (Plateau 2)
+        { duration: "10s", target: 5_000 }, // Ramp to 2K users
+        { duration: "30s", target: 5_000 }, // Hold at 2K users (Plateau 1)
+        { duration: "40s", target: 10_000 }, // Ramp to 6K users
+        { duration: "30s", target: 10_000 }, // Hold at 6K users (Plateau 2)
         { duration: "10s", target: 0 }, // Ramp down
       ],
     },

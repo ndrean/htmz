@@ -1,17 +1,22 @@
 const std = @import("std");
 const builtin = @import("builtin");
 const httpz = @import("httpz");
+const okredis = @import("okredis");
+
 const jwt = @import("jwt.zig");
 const database = @import("database.zig");
 const cart_manager = @import("cart_manager.zig");
+const kv_cart_manager = @import("kv_cart_manager.zig");
 const templates = @import("templates.zig");
 const ws_httpz = @import("ws_httpz.zig");
 
-// Embed static files at compile time
+// comptime Embed static files at compile time
 const static_html = @embedFile("html/index.html.gz");
 const static_css = @embedFile("html/index.css.gz");
 const static_htmx = @embedFile("html/htmx.min.js.gz");
 const static_ws = @embedFile("html/ws.min.js.gz");
+
+const Client = okredis.Client;
 
 /// Application Context. Owns database and cart manager
 // Handler struct for httpz server with WebSocket support
@@ -24,16 +29,15 @@ const Handler = struct {
 const AppContext = struct {
     allocator: std.mem.Allocator,
     database: *database.Database,
-    cart_manager: *cart_manager.CartManager,
+    cart_manager: *kv_cart_manager.KVCartManager,
 
-    pub fn init(allocator: std.mem.Allocator) !AppContext {
-        // Heap allocation needed because cart_manager needs mutable reference to database
+    pub fn init(allocator: std.mem.Allocator, kv_uri: []const u8) !AppContext {
+        // Heap allocation to survive the scope
         const db = try allocator.create(database.Database);
-        // create database file with 2 connections in pool
         db.* = try database.Database.init(allocator, "htmz.sql3", 2);
-
-        const cm = try allocator.create(cart_manager.CartManager);
-        cm.* = try cart_manager.CartManager.init(allocator, db);
+        // heap allocation to survive the scope
+        const cm = try allocator.create(kv_cart_manager.KVCartManager);
+        cm.* = try kv_cart_manager.KVCartManager.init(allocator, db, kv_uri);
 
         return AppContext{
             .allocator = allocator,
@@ -164,7 +168,7 @@ pub fn cartCountHandler(handler: Handler, req: *httpz.Request, res: *httpz.Respo
     const user_id = payload.user_id;
 
     // Get cart count from cart manager
-    const count = handler.app.cart_manager.getCartCount(user_id) catch 0;
+    const count = handler.app.cart_manager.getCartCount(res.arena, user_id) catch 0;
 
     const count_str = std.fmt.allocPrint(res.arena, "{d}", .{count}) catch {
         res.status = 500;
@@ -313,8 +317,10 @@ pub fn cartGetHandler(handler: Handler, req: *httpz.Request, res: *httpz.Respons
         try res.write();
         return;
     };
+
     defer jwt.deinitPayload(res.arena, payload);
     const user_id = payload.user_id;
+    std.debug.print("Fetching cart for user: {s}\n", .{user_id});
 
     // Get cart items from cart manager (using arena - no manual cleanup needed)
     const cart_items = handler.app.cart_manager.getCart(res.arena, user_id) catch {
@@ -358,6 +364,7 @@ pub fn cartGetHandler(handler: Handler, req: *httpz.Request, res: *httpz.Respons
 }
 
 pub fn cartAddHandler(handler: Handler, req: *httpz.Request, res: *httpz.Response) !void {
+    std.debug.print("cartAddHandler\n", .{});
     // Get user ID from JWT
     const payload = validateJWT(req, res.arena) orelse {
         res.status = 401;
@@ -383,7 +390,7 @@ pub fn cartAddHandler(handler: Handler, req: *httpz.Request, res: *httpz.Respons
     };
 
     // Add item to cart
-    handler.app.cart_manager.addToCart(user_id, item_id) catch {
+    handler.app.cart_manager.addToCart(res.arena, user_id, item_id) catch {
         res.status = 500;
         res.body = "500 - Cart Error";
         try res.write();
@@ -422,7 +429,7 @@ pub fn cartIncreaseHandler(handler: Handler, req: *httpz.Request, res: *httpz.Re
     };
 
     // Increase quantity
-    handler.app.cart_manager.increaseQuantity(user_id, item_id) catch {
+    handler.app.cart_manager.increaseQuantity(res.arena, user_id, item_id) catch {
         res.status = 500;
         res.body = "500 - Cart Error";
         try res.write();
@@ -489,7 +496,7 @@ pub fn cartDecreaseHandler(handler: Handler, req: *httpz.Request, res: *httpz.Re
     };
 
     // Decrease quantity
-    handler.app.cart_manager.decreaseQuantity(user_id, item_id) catch {
+    handler.app.cart_manager.decreaseQuantity(res.arena, user_id, item_id) catch {
         res.status = 500;
         res.body = "500 - Cart Error";
         try res.write();
@@ -515,6 +522,7 @@ pub fn cartDecreaseHandler(handler: Handler, req: *httpz.Request, res: *httpz.Re
                 try res.write();
                 return;
             };
+            std.debug.print("{s}\n", .{quantity_str});
 
             res.status = 200;
             res.content_type = httpz.ContentType.HTML;
@@ -568,7 +576,7 @@ pub fn cartRemoveHandler(handler: Handler, req: *httpz.Request, res: *httpz.Resp
     };
 
     // Remove item from cart
-    handler.app.cart_manager.removeFromCart(user_id, item_id) catch {
+    handler.app.cart_manager.removeFromCart(res.arena, user_id, item_id) catch {
         res.status = 500;
         res.body = "500 - Cart Error";
         try res.write();
@@ -658,40 +666,24 @@ fn performCleanup() void {
 }
 
 /// Cleanup handler to clear all carts => useful for testing with k6
+/// Note: For Redis-backed carts, this would require additional logic to enumerate and clear all cart keys
 pub fn cleanupCartsHandler(handler: Handler, _: *httpz.Request, res: *httpz.Response) !void {
-    // Clear all carts (useful after tests)
-    handler.app.cart_manager.rwlock.lock();
-    defer handler.app.cart_manager.rwlock.unlock();
-
-    var iter = handler.app.cart_manager.user_carts.iterator();
-    var count: u32 = 0;
-    while (iter.next()) |entry| {
-        handler.app.cart_manager.allocator.free(entry.key_ptr.*);
-        entry.value_ptr.deinit();
-        count += 1;
-    }
-    handler.app.cart_manager.user_carts.clearAndFree();
-
-    const result = std.fmt.allocPrint(res.arena, "Cleaned up {d} carts", .{count}) catch "Cleanup complete";
+    _ = handler;
+    // TODO: Implement Redis FLUSHDB or pattern-based cart cleanup for KVCartManager
+    // For now, just return success since Redis carts persist until explicitly removed
+    const result = "Redis cart cleanup not implemented - carts persist until user disconnects";
     res.status = 200;
     res.body = result;
     try res.write();
 }
 
 /// Cart statistics handler - shows logical cart count for memory leak tracking
+/// Note: For Redis-backed carts, this would require querying Redis for cart statistics
 pub fn cartStatsHandler(handler: Handler, _: *httpz.Request, res: *httpz.Response) !void {
-    handler.app.cart_manager.rwlock.lockShared();
-    defer handler.app.cart_manager.rwlock.unlockShared();
-
-    const user_count = handler.app.cart_manager.user_carts.count();
-    var total_items: u32 = 0;
-
-    var iter = handler.app.cart_manager.user_carts.iterator();
-    while (iter.next()) |entry| {
-        total_items += @intCast(entry.value_ptr.count());
-    }
-
-    const result = std.fmt.allocPrint(res.arena, "{{ \"users\": {d}, \"total_items\": {d} }}", .{ user_count, total_items }) catch "{ \"users\": 0, \"total_items\": 0 }";
+    _ = handler;
+    // TODO: Implement Redis-based cart statistics by querying for "cart:*" keys
+    // For now, return placeholder stats since Redis carts require pattern scanning
+    const result = "{ \"users\": \"redis\", \"total_items\": \"redis\" }";
     res.status = 200;
     res.content_type = httpz.ContentType.JSON;
     res.body = result;
@@ -737,7 +729,7 @@ pub fn main() !void {
         .ReleaseFast, .ReleaseSmall => std.heap.c_allocator,
     };
 
-    var app = try AppContext.init(allocator);
+    var app = try AppContext.init(allocator, "127.0.0.1");
     defer app.deinit();
 
     const config = httpz.Config{

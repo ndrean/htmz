@@ -1,7 +1,8 @@
 const std = @import("std");
 const httpz = @import("httpz");
 const jwt = @import("jwt.zig");
-const cart_manager = @import("cart_manager.zig");
+// const cart_manager = @import("cart_manager.zig");
+const kv_cart_manager = @import("kv_cart_manager.zig");
 
 const websocket = httpz.websocket;
 
@@ -41,12 +42,12 @@ pub const WSClient = struct {
     user_id: []const u8,
     conn: *websocket.Conn,
     allocator: std.mem.Allocator,
-    cart_manager: *cart_manager.CartManager,
+    cart_manager: *kv_cart_manager.KVCartManager,
 
     pub const WSContext = struct {
         user_id: []const u8,
         allocator: std.mem.Allocator,
-        cart_manager: *cart_manager.CartManager,
+        cart_manager: *kv_cart_manager.KVCartManager,
     };
 
     pub fn init(conn: *websocket.Conn, context: *const WSContext) !@This() {
@@ -96,7 +97,7 @@ pub const WSClient = struct {
         // std.log.info("Cleaning up WebSocket client for user: {s}", .{self.user_id});
 
         // Clean up user's cart data
-        self.cart_manager.removeUserCart(self.user_id);
+        try self.cart_manager.removeUserCart(self.allocator, self.user_id);
 
         // Remove from clients list
         {

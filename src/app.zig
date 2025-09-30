@@ -304,7 +304,7 @@ pub fn apiItemDetailsHandler(handler: Handler, req: *httpz.Request, res: *httpz.
     try res.write();
 }
 
-// Shopping cart handlers
+// Shopping cart handler
 pub fn cartGetHandler(handler: Handler, req: *httpz.Request, res: *httpz.Response) !void {
     // Get user ID from JWT
     const payload = validateJWT(req, res.arena) orelse {

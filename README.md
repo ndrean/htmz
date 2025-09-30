@@ -136,7 +136,6 @@ pnpm --filter htmz make:public
 ln -s src/html/svg public/svg
 ```
 
-
 ## Memory leak detection
 
 Memory leak detection on in Debug mode with `std.posix.sigaction` (cf [this example](https://github.com/karlseguin/http.zig/blob/master/examples/09_shutdown.zig)).

@@ -4,7 +4,7 @@
   "scripts": {
     "build:css": "tailwindcss -i input.css -o index.css --minify",
     "htmx": "cp node_modules/htmx-ext-ws/dist/ws.min.js.gz node_modules/htmx.org/dist/htmx.min.js.gz .",
-    "make:public": "gzip -c index.html > ../../public/index.html.gz && gzip -c index.css > ../../public/index.css.gz && cp node_modules/htmx-ext-ws/dist/ws.min.js.gz node_modules/htmx.org/dist/htmx.min.js.gz ../../public/ && mkdir -p ../../public/svg && cp svg/*.svg ../../public/svg/"
+    "make:public": "gzip -c index.html > ../../public/index.html.gz && gzip -c index.css > ../../public/index.css.gz && cp node_modules/htmx-ext-ws/dist/ws.min.js.gz node_modules/htmx.org/dist/htmx.min.js.gz ../../public/"
   },
   "packageManager": "pnpm@10.16.1",
   "devDependencies": {

@@ -96,7 +96,7 @@
     <script src="htmx.min.js"></script>
     <script src="ws.min.js"></script>
     <script>
-      document.body.addEventListener("htmx:wsBeforeMessage", function (e) {
+      document.body.addEventListener("htmx:wsBeforeMessage", (e) => {
         const message = e.detail.message;
         // If message is just a number, update presence count innerHTML
         if (/^\d+$/.test(message)) {
@@ -105,13 +105,13 @@
         }
       });
 
-      // Keep WebSocket alive with periodic pings
-      document.body.addEventListener("htmx:wsOpen", function (e) {
+      // Keep WebSocket alive with periodic pings every 30 seconds
+      document.body.addEventListener("htmx:wsOpen", (e) => {
         const socketWrapper = e.detail.socketWrapper;
         if (socketWrapper && socketWrapper.send) {
           setInterval(() => {
             socketWrapper.send("ping");
-          }, 30000); // Every 30 seconds
+          }, 30000);
         } else {
           console.error("Could not find socketWrapper.send method");
         }

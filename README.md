@@ -122,6 +122,21 @@ sequenceDiagram
 - `hx-trigger="load, cartUpdate from:body"` - Element listens for events
 - `HX-Trigger: cartUpdate` header - Server tells browser to fire events
 
+## Setup assets
+
+Copy the `.gz` versions of _index.html_, _index.css_, _htmx.min.js_ and _ws.min.js_  into "/public",
+and symlink the SVGs from src/html/svg into public/svg
+
+```sh
+pnpm --filter htmz update --recursive
+```
+
+```sh
+pnpm --filter htmz make:public
+ln -s src/html/svg public/svg
+```
+
+
 ## Memory leak detection
 
 Memory leak detection on in Debug mode with `std.posix.sigaction` (cf [this example](https://github.com/karlseguin/http.zig/blob/master/examples/09_shutdown.zig)).
@@ -324,4 +339,3 @@ Peak VUs: 8000
 Total Requests: 2223424
 Failed Requests: 0.00%
 ```
-

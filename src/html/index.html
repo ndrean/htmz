@@ -3,14 +3,12 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>HTMX-Z Demo</title>
-    <link rel="stylesheet" href="index.css" />
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link
-      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap"
-      rel="stylesheet"
+    <meta
+      name="description"
+      content="A demo shopping cart app using Zig for SSR with HTMX and TailwindCSS for the frontend."
     />
+    <title>HTMX-Z Demo</title>
+    <link rel="stylesheet" href="/index.css" />
   </head>
   <body
     class="bg-gray-50 min-h-screen flex flex-col items-center p-6 font-inter"
@@ -93,8 +91,8 @@
     <footer class="mt-8 text-gray-500 text-sm text-center">
       &copy; 2025 HTMX-Z
     </footer>
-    <script src="htmx.min.js"></script>
-    <script src="ws.min.js"></script>
+    <script src="/htmx.min.js"></script>
+    <script src="/ws.min.js"></script>
     <script>
       document.body.addEventListener("htmx:wsBeforeMessage", (e) => {
         const message = e.detail.message;

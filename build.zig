@@ -20,6 +20,17 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
 
+    // Frontend asset URL routes (not file paths)
+    const frontend_assets = [_][]const u8{
+        "/index.css",
+        "/htmx.min.js",
+        "/ws.min.js",
+    };
+
+    // Create build options for frontend assets
+    const build_options = b.addOptions();
+    build_options.addOption([]const []const u8, "frontend_assets", &frontend_assets);
+
     const exe = b.addExecutable(.{
         .name = "htmz",
         .root_module = b.createModule(.{
@@ -32,6 +43,7 @@ pub fn build(b: *std.Build) void {
     exe.root_module.addImport("sqlite", sqlite.module("sqlite"));
     // exe.root_module.addImport("zap", zap.module("zap"));
     exe.root_module.addImport("httpz", httpz.module("httpz"));
+    exe.root_module.addOptions("build_options", build_options);
 
     b.installArtifact(exe);
 

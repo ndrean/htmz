@@ -12,7 +12,7 @@ export const options = {
       stages: [
         { duration: "10s", target: 2_000 }, // Ramp to 2K users
         { duration: "30s", target: 2_000 }, // Hold at 2K users (Plateau 1)
-        { duration: "40s", target: 8_000 }, // Ramp to 6K users
+        { duration: "30s", target: 8_000 }, // Ramp to 6K users
         { duration: "30s", target: 8_000 }, // Hold at 6K users (Plateau 2)
         { duration: "10s", target: 0 }, // Ramp down
       ],
@@ -68,7 +68,8 @@ export default function () {
   // au (10s ramp + 30s hold)
   if (elapsedSeconds >= 10 && elapsedSeconds <= 40) currentStage = "plateau5k";
   // 50-80s: 10K plateau (after 10s ramp, 30s hold)
-  if (elapsedSeconds >= 80 && elapsedSeconds <= 110)
+
+  if (elapsedSeconds >= 70 && elapsedSeconds <= 110)
     currentStage = "plateau10k";
 
   const randomItemId = itemIds[Math.floor(Math.random() * itemIds.length)];

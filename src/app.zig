@@ -7,11 +7,16 @@ const cart_manager = @import("cart_manager.zig");
 const templates = @import("templates.zig");
 const ws_httpz = @import("ws_httpz.zig");
 
+//  Build-time discovered frontend assets
+const frontend_assets = @import("build_options").frontend_assets;
+
 // Embed static files at compile time
 const static_html = @embedFile("html/index.html.gz");
-const static_css = @embedFile("html/index.css.gz");
-const static_htmx = @embedFile("html/htmx.min.js.gz");
-const static_ws = @embedFile("html/ws.min.js.gz");
+
+// Old static constants (replaced by generic staticFileHandler):
+// const static_css = @embedFile("html/index.css.gz");
+// const static_htmx = @embedFile("html/htmx.min.js.gz");
+// const static_ws = @embedFile("html/ws.min.js.gz");
 
 /// Application Context. Owns database and cart manager
 // Handler struct for httpz server with WebSocket support
@@ -90,6 +95,28 @@ fn createNewJWTUser(allocator: std.mem.Allocator) !jwt.JWTPayload {
     };
 }
 
+// Generic static file handler generator
+fn staticFileHandler(
+    comptime path: []const u8,
+    comptime headers: []const struct { []const u8, []const u8 },
+) fn (handler: Handler, req: *httpz.Request, res: *httpz.Response) anyerror!void {
+    const gen = struct {
+        fn handler(_: Handler, _: *httpz.Request, res: *httpz.Response) !void {
+            res.status = 200;
+            res.content_type = comptime httpz.ContentType.forFile(path);
+            const file_path = comptime "html/" ++ path[1..] ++ ".gz";
+            res.body = @embedFile(file_path);
+            res.headers.add("content-encoding", "gzip");
+            res.headers.add("cache-control", "public, max-age=31536000");
+            inline for (headers) |header| {
+                res.headers.add(header[0], header[1]);
+            }
+            try res.write();
+        }
+    };
+    return gen.handler;
+}
+
 pub fn indexHandler(_: Handler, req: *httpz.Request, res: *httpz.Response) !void {
     // Check if user has valid JWT, create one if not
     if (validateJWT(req, res.arena)) |payload| {
@@ -128,29 +155,30 @@ pub fn indexHandler(_: Handler, req: *httpz.Request, res: *httpz.Response) !void
     try res.write();
 }
 
-pub fn cssHandler(_: Handler, _: *httpz.Request, res: *httpz.Response) !void {
-    res.status = 200;
-    res.content_type = httpz.ContentType.CSS;
-    res.headers.add("content-encoding", "gzip");
-    res.body = static_css;
-    try res.write();
-}
+// Old individual static handlers (replaced by generic staticFileHandler):
+// pub fn cssHandler(_: Handler, _: *httpz.Request, res: *httpz.Response) !void {
+//     res.status = 200;
+//     res.content_type = httpz.ContentType.CSS;
+//     res.headers.add("content-encoding", "gzip");
+//     res.body = static_css;
+//     try res.write();
+// }
 
-pub fn htmxHandler(_: Handler, _: *httpz.Request, res: *httpz.Response) !void {
-    res.status = 200;
-    res.content_type = httpz.ContentType.JS;
-    res.headers.add("content-encoding", "gzip");
-    res.body = static_htmx;
-    try res.write();
-}
+// pub fn htmxHandler(_: Handler, _: *httpz.Request, res: *httpz.Response) !void {
+//     res.status = 200;
+//     res.content_type = httpz.ContentType.JS;
+//     res.headers.add("content-encoding", "gzip");
+//     res.body = static_htmx;
+//     try res.write();
+// }
 
-pub fn wsHandler(_: Handler, _: *httpz.Request, res: *httpz.Response) !void {
-    res.status = 200;
-    res.content_type = httpz.ContentType.JS;
-    res.headers.add("content-encoding", "gzip");
-    res.body = static_ws;
-    try res.write();
-}
+// pub fn wsHandler(_: Handler, _: *httpz.Request, res: *httpz.Response) !void {
+//     res.status = 200;
+//     res.content_type = httpz.ContentType.JS;
+//     res.headers.add("content-encoding", "gzip");
+//     res.body = static_ws;
+//     try res.write();
+// }
 
 pub fn cartCountHandler(handler: Handler, req: *httpz.Request, res: *httpz.Response) !void {
     // Get user ID from JWT
@@ -441,19 +469,22 @@ pub fn cartIncreaseHandler(handler: Handler, req: *httpz.Request, res: *httpz.Re
     // Find the item to return its quantity
     for (cart_items) |cart_item| {
         if (cart_item.id == item_id) {
-            const quantity_str = std.fmt.allocPrint(res.arena, "{d}", .{cart_item.quantity}) catch {
-                res.status = 500;
-                res.body = "500 - Error";
-                try res.write();
-                return;
-            };
-
+            // No allocation approach - send raw number bytes
             res.status = 200;
-            res.content_type = httpz.ContentType.HTML;
+            res.content_type = httpz.ContentType.TEXT;
             res.headers.add("HX-Trigger", "updateCartCount, cartUpdate");
-            res.body = quantity_str;
+            res.body = @as([]const u8, @ptrCast(&cart_item.quantity))[0..@sizeOf(@TypeOf(cart_item.quantity))];
             try res.write();
             return;
+
+            // Previous allocation approach (commented):
+            // const quantity_str = std.fmt.allocPrint(res.arena, "{d}", .{cart_item.quantity}) catch {
+            //     res.status = 500;
+            //     res.body = "500 - Error";
+            //     try res.write();
+            //     return;
+            // };
+            // res.body = quantity_str;
         }
     }
 
@@ -508,20 +539,22 @@ pub fn cartDecreaseHandler(handler: Handler, req: *httpz.Request, res: *httpz.Re
     // Check if item still exists
     for (cart_items) |cart_item| {
         if (cart_item.id == item_id) {
-            // Item still exists, return updated quantity
-            const quantity_str = std.fmt.allocPrint(res.arena, "{d}", .{cart_item.quantity}) catch {
-                res.status = 500;
-                res.body = "500 - Error";
-                try res.write();
-                return;
-            };
-
+            // No allocation approach - send raw number bytes
             res.status = 200;
-            res.content_type = httpz.ContentType.HTML;
+            res.content_type = httpz.ContentType.TEXT;
             res.headers.add("HX-Trigger", "updateCartCount, cartUpdate");
-            res.body = quantity_str;
+            res.body = @as([]const u8, @ptrCast(&cart_item.quantity))[0..@sizeOf(@TypeOf(cart_item.quantity))];
             try res.write();
             return;
+
+            // Previous allocation approach (commented):
+            // const quantity_str = std.fmt.allocPrint(res.arena, "{d}", .{cart_item.quantity}) catch {
+            //     res.status = 500;
+            //     res.body = "500 - Error";
+            //     try res.write();
+            //     return;
+            // };
+            // res.body = quantity_str;
         }
     }
 
@@ -768,9 +801,13 @@ pub fn main() !void {
     var router = try server.router(.{});
 
     router.get("/", indexHandler, .{});
-    router.get("/index.css", cssHandler, .{});
-    router.get("/htmx.min.js", htmxHandler, .{});
-    router.get("/ws.min.js", wsHandler, .{});
+
+    // Auto-register all frontend assets with generic handler
+    inline for (frontend_assets) |path| {
+        std.log.info("Registering route: {s}", .{path});
+        router.get(path, staticFileHandler(path, &.{}), .{});
+    }
+
     router.get("/cart-count", cartCountHandler, .{});
     router.get("/groceries", groceriesHandler, .{});
     router.get("/api/items", apiItemsHandler, .{});

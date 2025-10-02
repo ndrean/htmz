@@ -25,6 +25,8 @@ pub fn build(b: *std.Build) void {
         "/index.css",
         "/htmx.min.js",
         "/ws.min.js",
+        "/robots.txt",
+        "/favicon.ico",
     };
 
     // Create build options for frontend assets

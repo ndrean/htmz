@@ -104,10 +104,21 @@ fn staticFileHandler(
         fn handler(_: Handler, _: *httpz.Request, res: *httpz.Response) !void {
             res.status = 200;
             res.content_type = comptime httpz.ContentType.forFile(path);
-            const file_path = comptime "html/" ++ path[1..] ++ ".gz";
+
+            const is_gzipped = comptime !(std.mem.eql(u8, "/robots.txt", path) or std.mem.eql(u8, "/favicon.ico", path));
+            const file_path = comptime if (is_gzipped)
+                "html/" ++ path[1..] ++ ".gz"
+            else
+                "html/" ++ path[1..];
+
             res.body = @embedFile(file_path);
-            res.headers.add("content-encoding", "gzip");
+
+            if (is_gzipped) {
+                res.headers.add("content-encoding", "gzip");
+            }
+
             res.headers.add("cache-control", "public, max-age=31536000");
+
             inline for (headers) |header| {
                 res.headers.add(header[0], header[1]);
             }

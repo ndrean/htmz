@@ -11,7 +11,7 @@ const ws_httpz = @import("ws_httpz.zig");
 const frontend_assets = @import("build_options").frontend_assets;
 
 // Embed static files at compile time
-const static_html = @embedFile("html/index.html.gz");
+const static_html = @embedFile("html/index.html.zst");
 
 // Old static constants (replaced by generic staticFileHandler):
 // const static_css = @embedFile("html/index.css.gz");
@@ -105,16 +105,16 @@ fn staticFileHandler(
             res.status = 200;
             res.content_type = comptime httpz.ContentType.forFile(path);
 
-            const is_gzipped = comptime !(std.mem.eql(u8, "/robots.txt", path) or std.mem.eql(u8, "/favicon.ico", path));
-            const file_path = comptime if (is_gzipped)
-                "html/" ++ path[1..] ++ ".gz"
+            const is_comp = comptime !(std.mem.eql(u8, "/robots.txt", path) or std.mem.eql(u8, "/favicon.ico", path));
+            const file_path = comptime if (is_comp)
+                "html/" ++ path[1..] ++ ".zst"
             else
                 "html/" ++ path[1..];
 
             res.body = @embedFile(file_path);
 
-            if (is_gzipped) {
-                res.headers.add("content-encoding", "gzip");
+            if (is_comp) {
+                res.headers.add("content-encoding", "zstd");
             }
 
             res.headers.add("cache-control", "public, max-age=31536000");
@@ -161,7 +161,7 @@ pub fn indexHandler(_: Handler, req: *httpz.Request, res: *httpz.Response) !void
 
     res.status = 200;
     res.content_type = httpz.ContentType.HTML;
-    res.headers.add("content-encoding", "gzip");
+    res.headers.add("content-encoding", "zstd");
     res.body = static_html;
     try res.write();
 }

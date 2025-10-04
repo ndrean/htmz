@@ -10,6 +10,8 @@
     <title>HTMX-Z Demo</title>
     <link rel="icon" href="/favicon.ico" type="image/x-icon" />
     <link rel="stylesheet" href="/index.css" />
+    <script src="/htmx.min.js" defer></script>
+    <script src="/ws.min.js" defer></script>
   </head>
   <body
     class="bg-gray-50 min-h-screen flex flex-col items-center p-6 font-inter"
@@ -92,8 +94,8 @@
     <footer class="mt-8 text-gray-500 text-sm text-center">
       &copy; 2025 HTMX-Z
     </footer>
-    <script src="/htmx.min.js"></script>
-    <script src="/ws.min.js"></script>
+    <!--<script src="/htmx.min.js"></script>
+    <script src="/ws.min.js"></script>-->
     <script>
       document.body.addEventListener("htmx:wsBeforeMessage", (e) => {
         const message = e.detail.message;

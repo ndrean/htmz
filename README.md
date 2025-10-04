@@ -1,4 +1,7 @@
 # HTMZ
+![Zig support](https://img.shields.io/badge/Zig-0.15.1-color?logo=zig&color=%23f3ab20)
+[![SQLite](https://img.shields.io/badge/SQLite-%2307405e.svg?logo=sqlite&logoColor=white)](#)
+[![HTMX](https://img.shields.io/badge/HTMX-36C?logo=htmx&logoColor=fff)](#)
 
 It displays a grocery list where you can view the details of each product. It holds the price.
 You can select a product to add to the shopping list. A total number of items gets updated.

@@ -1,7 +1,7 @@
 # HTMZ
 ![Zig support](https://img.shields.io/badge/Zig-0.15.1-color?logo=zig&color=%23f3ab20)
+![Static Badge](https://img.shields.io/badge/http-zig-yellow)
 [![SQLite](https://img.shields.io/badge/SQLite-%2307405e.svg?logo=sqlite&logoColor=white)](#)
-![Static Badge](https://img.shields.io/badge/http-zig-orange)
 [![HTMX](https://img.shields.io/badge/HTMX-36C?logo=htmx&logoColor=fff)](#)
 
 It displays a grocery list where you can view the details of each product. It holds the price.
